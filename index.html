@@ -11,7 +11,7 @@
             }
         </style>
         <script>
-            const VERSION = "v0"; // It's gonna be awhile before this is relevant
+            const VERSION = "v0.0.1"; // It's gonna be awhile before this is relevant
             let ctx;
             
             let pressedKeys = {};
@@ -351,19 +351,18 @@
                                 }
                                 if(pressedKeys["40"]) {
                                     // Crouch
-                                    // THINK! Do I need more?
+                                    // THINK! Do I need to add more? Yes, I think so.
                                     this.state = "crouch.idle";
                                 }
                                 
                                 // Angling
-                                this.angle = (this.angle < 0 ? Math.min(0, this.angle + 5) : Math.max(0, this.angle - 5));
+                                this.goalAngle = 0;
                             } else if(this.in("fall")) {
                                 if(pressedKeys["90"] && this.state == "fall.slide") {
                                     // Wall jump
                                     this.yvel = -4;
                                     this.xvel = this.facing * -4;
                                 }
-                                
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     this.facing = 1;
                                     this.xvel += 0.05;
@@ -379,9 +378,9 @@
                                 this.lgp = ((pressedKeys["39"] || pressedKeys["37"]) ? [5 - this.facing * 10, 30 - this.facing * 10] : [5, 35]);
                             } else if(this.in("crouch")) {
                                 // Crawling
+                                // FIRST! Fix standing up when you turn
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     if((this.state == "crouch.idle" || this.state == "crouch.crawl") && this.facing == -1) {
-                                        // FIRST! Crawl turn animation
                                         this.state = "crouch.turn";
                                     } else if(this.state == "crouch.idle" || (this.facing == 1 && this.state == "crouch.crawl")) {
                                         // Move forward
@@ -392,7 +391,6 @@
                                     this.facing = 1;
                                 } else if(pressedKeys["37"]) {
                                     if((this.state == "crouch.idle" || this.state == "crouch.crawl") && this.facing == 1) {
-                                        // FIRST! Crawl turn animation FIX!
                                         this.state = "crouch.turn";
                                     } else if(this.state == "crouch.idle" || this.state == "crouch.crawl") {
                                         // Move forward
@@ -411,16 +409,17 @@
                                 }
                                 
                                 // Angling
-                                this.angle = (this.facing == 1 ? Math.min(90, this.angle + 5) : Math.max(-90, this.angle - 5));
+                                this.goalAngle = this.facing * 90;
+                                if(this.state == "crouch.turn" && this.facing * 90 == this.angle) this.state = "crouch.idle";
                             }
                             
                             // Stun timer
                             if(this.stunTime) {
-                                this.angle = (this.facing == 1 ? Math.min(90, this.angle + 10) : Math.max(-90, this.angle - 10));
+                                this.goalAngle = this.facing * 90;
                                 this.stunTime = Math.max(0, this.stunTime - 1);
                                 if(!this.stunTime) this.state = "stun.recover";
                             } else if(this.state == "stun.recover") {
-                                this.angle = (this.angle < 0 ? Math.min(0, this.angle + 10) : Math.max(0, this.angle - 10));
+                                this.goalAngle = 0;
                                 if(!this.angle) this.state = "stand.idle";
                             }
                             
@@ -429,18 +428,20 @@
                                 this.btgp = 2 * this.xvel;
                             }
                             
-                            // Movement
+                            // Horizontal movement
                             this.xpos += this.xvel;
                             if(this.contact()) {
+                                //alert("Xvel contact.");
                                 // Try to just walk upwards
                                 let checks = 0;
-                                while(checks < 10 && this.contact()) {
+                                while(checks < 10 && this.contact() && !this.in("fall")) { // No, you can't WALK up while FALLING
                                     this.xpos -= 0.1 * this.xvel;
                                     this.ypos -= 0.2 * this.xvel;
                                     checks++;
                                 }
-                                if(checks == 10) {
-                                    // Aww...
+                                if(checks == 10 || this.in("fall")) {
+                                    // Aww... Undo that
+                                    //this.xpos -= this.xvel;
                                     this.xpos -= 0.1 * (10 - checks) * this.xvel;
                                     this.ypos += 0.2 * checks * this.xvel;
                                     if(this.in("stand")) {
@@ -488,12 +489,27 @@
                                 }
                                 if(this.yvel > 20) { // THINK! Figure out the right fall stun threshold
                                     this.stun(5 * (this.yvel - 15));
-                                } else if(this.state != "fall.slide") { // Don't stand up while wall sliding
+                                } else if(this.state != "fall.slide" && !this.in("crouch")) {
+                                    // Just move around a little to make sure nothing weird is happening
+                                    let c1 = this.contact();
+                                    this.xvel += this.facing * 3;
+                                    let c = this.contact();
+                                    this.xvel -= this.facing * 3;
+                                    //alert("Ouch! c1="+c1+" c="+c);
+                                    if(!c1 && !c) this.state = "stand.idle";
+                                } else if(this.state == "fall.slide") {
+                                    // You probably just slid down to the ground
+                                    //alert("Slidedown");
                                     this.state = "stand.idle";
                                 }
                                 this.yvel = 0;
                             } else if(this.in("fall")) {
                                 this.yvel += 0.2; // Gravity
+                            } else if(this.contact() && this.yvel >= 0 && this.state != "stand.walk" && !this.in("crouch")) {
+                                // Climbing up
+                                this.ypos -= 5;
+                                // Put in crouch-state after climbing up
+                                this.state = "crouch.idle";
                             }
                             // Did you just walk off the edge
                             this.ypos += 3;
@@ -502,8 +518,22 @@
                             }
                             this.ypos -= 6;
                             
-                            // Angles
-                            let cx = 5, cy = 75 - 15 * this.facing;
+                            // Changing angle
+                            let speed = (this.in("stun") ? 10 : 5);
+                            let oa = this.angle;
+                            if(this.angle < this.goalAngle) {
+                                this.angle = Math.min(this.goalAngle, this.angle + speed);
+                            } else {
+                                this.angle = Math.max(this.goalAngle, this.angle - speed);
+                            }
+                            if(this.contact()) {
+                                this.angle = oa + (oa > 0 ? -1 : 1);
+                                this.goalAngle = 0;
+                                //alert(this.state+" « before »");
+                                if(this.state == "crouch.idle") {this.state = "stand.idle";}
+                                //alert(this.state+" « after »");
+                            }
+                            let cx = 5, cy = (this.facing == 1 ? 60 : 90);
                             for(let i of Object.values(this.body)) {
                                 i.cx = cx; i.cy = cy;
                             }
@@ -542,8 +572,7 @@
                                 }
                             }
                             
-                            // THINK! Should this work in fall.* states?
-                            if(this.in("stand") && Math.abs(this.angle) < 1) {
+                            if((this.in("stand") || this.in("fall")) && Math.abs(this.angle) < 1) {
                                 this.body.bodyTL.xpos += 0.1 * (this.btgp + 5 - this.body.bodyTL.xpos);
                                 this.body.bodyTR.xpos += 0.1 * (this.btgp + 35 - this.body.bodyTR.xpos);
                                 this.body.earLS.xpos += 0.1 * (this.btgp + 5 - this.body.earLS.xpos);
@@ -608,7 +637,7 @@
                     this.yvel = 0;
                     this.builtSpeed = 0; // How long you've been going in the current direction
                     this.tail = [];
-                    this.angle = 0;
+                    this.angle = 0, this.goalAngle = 0; // Where you want to turn
                     this.stunTime = 0;
                     this.colliding = 0; // Whether to stop BTGP due to a collision
                 }
@@ -625,12 +654,12 @@
             try {
                 let startRoom = new Room(
                     // FG MG BG
-                    [new Rectangle(300, 150, 100, 250, "#633")],
+                    [new Rectangle(300, 50, 100, 250, "#633")],
                     [
-                        new Rectangle(10, 50, 80, 250, "#363"),
-                        new Rectangle(700, 50, 80, 250, "#363"),
-                        new Rectangle(110, 220, 450, 80, "#363"),
-                        new Polygon([[250, 220], [280, 150], [330, 220]], "#363"), // Wtf is this
+                        new Rectangle(10, 50, 80, 350, "#363"),
+                        new Rectangle(900, 50, 80, 350, "#363"),
+                        new Rectangle(110, 320, 700, 80, "#363"),
+                        new Polygon([[250, 320], [280, 250], [330, 320]], "#363"), // Wtf is this
                     ],
                     [new Rectangle(500, 50, 100, 250, "#336")]
                 );
@@ -646,9 +675,8 @@
                 }
                 newKeys = [];
                 
-                document.getElementById("sayer").innerHTML = `state=${SC.state} facing=${SC.facing} vel=(${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos=(${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle=${SC.angle} hb=${SC.getHitbox().touches(SC.room.hitbox)} bspeed=${SC.builtSpeed.toFixed(0)}`;
+                document.getElementById("sayer").innerHTML = `state=${SC.state} facing=${SC.facing} vel=(${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos=(${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle=${SC.angle} (${SC.goalAngle}) hb=${SC.getHitbox().touches(SC.room.hitbox)} bspeed=${SC.builtSpeed.toFixed(0)}`;
                 
-                // Uncomment this to draw more frames
                 window.requestAnimationFrame(frame);
             } catch(e) { alert("Error in frame(): " + e); } }
 
