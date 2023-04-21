@@ -1,6 +1,6 @@
 <html>
     <head>
-        <title>just a test</title>
+        <title id="titell">something has gone very wrong</title>
         <style>
             html {
                 background: #222;
@@ -11,7 +11,8 @@
             }
         </style>
         <script>
-            const VERSION = "v0.0.1"; // It's gonna be awhile before this is relevant
+            const VERSION = "v0.0.2"; // It's gonna be awhile before this is relevant
+            document.getElementById("titell").textContent = "wetlands " + VERSION;
             let ctx;
             
             let pressedKeys = {};
@@ -27,12 +28,12 @@
             
             function drawBody(t, l, r, c = "white") {
                 ctx.lineWidth = r;
-                ctx.fillStyle = c;
                 ctx.lineCap = "round";
                 for(let i=0; i<l.length; i++) {
-                    line(t.bodyCoords(l[i]), t.bodyCoords(i + 1 == l.length ? l[0] : l[i + 1]));
+                    line(t.bodyCoords(l[i]), t.bodyCoords(i + 1 == l.length ? l[0] : l[i + 1]), c);
                 }
                 ctx.beginPath();
+                ctx.fillStyle = c;
                 for(let i of l) {
                     ctx.lineTo(...t.bodyCoords(i));
                 }
@@ -50,6 +51,24 @@
                 ctx.moveTo(p[0], p[1]);
                 ctx.lineTo(q[0], q[1]);
                 ctx.stroke();
+            }
+            
+            class Pole {
+                // You know those climbable poles? This is them
+                constructor(start, end, other, dir) {
+                    this.start = start;
+                    this.end = end;
+                    this.other = other;
+                    this.dir = dir;
+                }
+                render() {
+                    ctx.lineWidth = 8;
+                    if(this.dir == "v") {
+                        line([this.other, this.start], [this.other, this.end], "black");
+                    } else {
+                        line([this.start, this.other], [this.end, this.other], "black");
+                    }
+                }
             }
             
             class Rectangle {
@@ -158,11 +177,12 @@
             }
             
             class Room {
-                constructor(fg, mg, bg) {
+                constructor(fg, mg, bg, p) {
                     // These are lists of polygons that get called to draw the room.
                     this.foreground = fg;
                     this.midground = mg;
                     this.background = bg;
+                    this.poles = p;
                     this.hitbox = new Hitbox(mg);
                     // The entities in the room
                     this.entities = [];
@@ -170,6 +190,11 @@
                 render() {
                     for(let i of this.background) {i.render();}
                     for(let j of this.entities) {j.render();}
+                    for(let p of this.poles) {p.render();}
+                    // For the SC specifically, render the hands on top
+                    if(SC.room == this) {
+                        SC.doHands();
+                    }
                     for(let l of this.midground) {l.render();}
                     for(let k of this.foreground) {k.render();}
                 }
@@ -199,7 +224,8 @@
             
             class BasicEntity {
                 constructor(n, r, x, y, s, b, g, re, t) {
-                    this.name = n;
+                    this.id = n;
+                    this.uuid = Math.random();
                     this.room = r;
                     r.entities.push(this);
                     this.xpos = x;
@@ -217,26 +243,87 @@
                 bodyCoords(b, xtrax = 0, xtray = 0) {
                     return [this.body[b].xpos + this.xpos + xtrax, this.body[b].ypos + this.ypos + xtray];
                 }
-                contact() {
-                    return this.getHitbox().touches(this.room.hitbox);
+                contact(w = "") {
+                    return (w ? this.getHitbox(w) : this.getHitbox()).touches(this.room.hitbox);
                 }
                 in(state) {
                     return this.state.includes(state + ".");
                 }
+                onPole(p, w = "") {
+                    // Check if the entity is on a pole
+                    return this.getHitbox(w).touches(new Rectangle(...(
+                        p.dir == "h" ? [p.start, p.other - 1, p.end - p.start, p.other + 1] : [p.other - 1, p.start, p.other + 1, p.end - p.start]
+                    )));
+                }
+            }
+            
+            class Lizard extends BasicEntity {
+                constructor(name, col, col2, room, xpoz, ypoz) {
+                    super(name, room, xpoz, ypoz, "stand.idle", {
+                        // um um uh what goes here
+                        headTU: new Position(5, 0),
+                        headBU: new Position(0, 20),
+                        headTL: new Position(0, 80),
+                        headBL: new Position(0, 85),
+                        headTB: new Position(80, 30),
+                        headBB: new Position(80, 70),
+                        headI: new Position(70, 50),
+                        eye: new Position(7, 7),
+                        backT: new Position(300, 30),
+                        backB: new Position(300, 70),
+                        legFLS: new Position(120, 70),
+                        legFLE: new Position(120, 100),
+                        legBLS: new Position(220, 70),
+                        legBLE: new Position(220, 100),
+                        legFRS: new Position(160, 70),
+                        legFRE: new Position(160, 100),
+                        legBRS: new Position(260, 70),
+                        legBRE: new Position(260, 100)
+                    }, function() {
+                        // get hitbox ugh
+                        // LATER!
+                        return new Polygon([]);
+                    }, function() {
+                        // Legs
+                        ctx.lineWidth = 10;
+                        line(this.bodyCoords("legFLS"), this.bodyCoords("legFLE"), this.primary);
+                        line(this.bodyCoords("legBLS"), this.bodyCoords("legBLE"), this.primary);
+                        line(this.bodyCoords("legFRS"), this.bodyCoords("legFRE"), this.secondary);
+                        line(this.bodyCoords("legBRS"), this.bodyCoords("legBRE"), this.secondary);
+                        // Body
+                        drawBody(this, ["headBB", "headTB", "backT", "backB"], 7, "black");
+                        // Head
+                        drawBody(this, ["headTU", "headBU", "headI", "headTL", "headBL", "headBB", "headTB"], 7, this.primary);
+                        circle(this.bodyCoords("eye"), 5);
+                        // LATER! Teeth
+                    }, function() {
+                        // Tick function
+                        // LARGE!
+                    });
+                    this.primary = col;
+                    this.secondary = col2;
+                }
+            }
+            
+            class PinkLizard extends Lizard {
+                constructor(room, xpoz, ypoz) {
+                    super("pinkliz", "#f6b", "#c26", room, xpoz, ypoz);
+                }
             }
             
             class Player extends BasicEntity {
-                constructor(room) {
+                constructor(room, xpoz, ypoz) {
                     // Construct!
                     super(
                         // State determines key handling, hitboxes, and rendering
                         // Second part of state is more precise
-                        "sc", room, 150, 50, "fall.idle",
+                        "sc", room, xpoz, ypoz, "fall.idle",
                         // These are the OFFSETS not the ABSOLUTE positions
                         {
                             bodyTL: new Position(5, 0), bodyTR: new Position(35, 0),
                             legLS: new Position(5, 70), legLE: new Position(5, 90),
                             legRS: new Position(35, 70), legRE: new Position(35, 90),
+                            // LATER! do something with the arms
                             armLS: new Position(10, 30), armLE: new Position(10, 30),
                             armRS: new Position(30, 30), armRE: new Position(30, 30),
                             eyeL: new Position(9, 11), eyeR: new Position(31, 11),
@@ -246,7 +333,7 @@
                         },
                         function(w = "full") {
                             // This should do for now
-                            if(w == "full") { return new Polygon([
+                            if(w == "full" || !w) { return new Polygon([
                                 this.bodyCoords("bodyTL"),
                                 this.bodyCoords("legLS"),
                                 this.bodyCoords("legLE"),
@@ -261,7 +348,7 @@
                             ]); }
                         },
                         function() {
-                            let showTail = true, showFace = true, showArms = false;
+                            let showTail = true, showFace = true, showArms = (this.in("climb") || this.in("balance") || this.in("crouch"));
                             
                             // middle part
                             drawBody(this, ["bodyTL", "bodyTR", "legRS", "legLS"], 10);
@@ -271,30 +358,38 @@
                             line(this.bodyCoords("earRS"), this.bodyCoords("earRE"));
                             
                             if(showTail) {
-                                let offx = -0.2 * Math.abs(this.angle), offy = 0.17 * Math.abs(this.angle), sizeMult = 1;
+                                let offx = 0.25 * this.angle, offy = 0.17 * Math.abs(this.angle), sizeMult = 1;
                                 for(let i of this.tail) {
                                     circle([i[0] + this.xpos + offx, i[1] + this.ypos + offy], sizeMult * (20 - 1 * this.tail.indexOf(i)), "white");
                                 }
                             }
+                            if(showArms) {
+                                ctx.lineWidth = 10;
+                                line(this.bodyCoords("armLS"), this.bodyCoords("armLE"));
+                                line(this.bodyCoords("armRS"), this.bodyCoords("armRE"));
+                            } else if(!this.angle) {
+                                // Try to hide the arms a little... but don't try too hard
+                                ctx.lineWidth = 10;
+                                line([this.xpos + 20, this.ypos + 30], this.bodyCoords("armLE"));
+                                line([this.xpos + 20, this.ypos + 30], this.bodyCoords("armRE"));
+                            }
                             if(showFace) {
-                                ctx.lineWidth = 5;
                                 if(this.dead) {
                                 } else if(this.stunTime) {
+                                    ctx.lineWidth = 3;
                                     line(this.bodyCoords("eyeL", 0.5 * this.xvel, 3), this.bodyCoords("eyeL", 0.5 * this.xvel, -3), "black");
                                     line(this.bodyCoords("eyeR", 0.5 * this.xvel, 3), this.bodyCoords("eyeR", 0.5 * this.xvel, -3), "black");
                                 } else {
+                                    ctx.lineWidth = 10;
                                     circle(this.bodyCoords("eyeL", 0.5 * this.xvel), 5);
                                     circle(this.bodyCoords("eyeR", 0.5 * this.xvel), 5);
                                 }
                                 circle(this.bodyCoords("nouth", 0.5 * this.xvel), 3);
                             }
-                            if(showArms) {
-                                line(this.bodyCoords("armLS"), this.bodyCoords("armLE"));
-                                line(this.bodyCoords("armRS"), this.bodyCoords("armRE"));
-                            }
                         },
                         function() {
-                            // Tick func
+                            // Controls
+                            const turnaround = 0.3;
                             if(this.in("stand")) {
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     if((this.facing == 1 && this.state == "stand.walk") || this.state == "stand.idle") {
@@ -302,11 +397,14 @@
                                         this.xvel += 0.2;
                                         this.state = "stand.walk";
                                     } else {
-                                        if(this.builtSpeed >= 60 || (this.xvel < 1 && this.state == "stand.turn" && this.facing == 1)) {
+                                        if(this.builtSpeed >= 60 || (this.xvel < 3 * turnaround && this.state == "stand.turn" && this.facing == 1)) {
                                             // LATER! Particles
                                             this.state = "stand.turn";
-                                            this.xvel += 0.2;
-                                            if(this.xvel >= 1) this.state == "stand.walk"; // LATER! boost velocity
+                                            this.xvel += turnaround;
+                                            if(this.xvel >= 3 * turnaround) {
+                                                this.state == "stand.walk"; // LATER! boost velocity
+                                                this.xvel = this.facing * 5;
+                                            }
                                         } else {
                                             // Just turn around normally
                                             this.xvel += 0.5;
@@ -322,11 +420,14 @@
                                         this.xvel -= 0.2;
                                         this.state = "stand.walk";
                                     } else {
-                                        if(this.builtSpeed >= 60 || (this.xvel > -1 && this.state == "stand.turn" && this.facing == -1)) {
+                                        if(this.builtSpeed >= 60 || (this.xvel > -3 * turnaround && this.state == "stand.turn" && this.facing == -1)) {
                                             // LATER! Particles
                                             this.state = "stand.turn";
-                                            this.xvel -= 0.2;
-                                            if(this.xvel <= -1) this.state == "stand.walk"; // LATER! boost velocity
+                                            this.xvel -= turnaround;
+                                            if(this.xvel <= -3 * turnaround) {
+                                                this.state == "stand.walk"; // LATER! boost velocity
+                                                this.xvel = this.facing * 5;
+                                            }
                                         } else {
                                             // Just turn around normally
                                             this.xvel -= 0.5;
@@ -348,20 +449,23 @@
                                     // Jump
                                     this.yvel = -6;
                                     this.state = "fall.idle";
+                                    this.builtSpeed = 0;
                                 }
-                                if(pressedKeys["40"]) {
+                                if(pressedKeys["40"] && !pressedKeys["38"]) {
                                     // Crouch
-                                    // THINK! Do I need to add more? Yes, I think so.
                                     this.state = "crouch.idle";
+                                    this.agpx = [50 * this.facing, 150 * this.facing];
+                                    // That was shrimple enough
                                 }
                                 
                                 // Angling
                                 this.goalAngle = 0;
                             } else if(this.in("fall")) {
-                                if(pressedKeys["90"] && this.state == "fall.slide") {
+                                if(pressedKeys["90"] && newKeys.includes(90) && this.state == "fall.slide") {
                                     // Wall jump
                                     this.yvel = -4;
                                     this.xvel = this.facing * -4;
+                                    this.builtSpeed = 0;
                                 }
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     this.facing = 1;
@@ -378,7 +482,6 @@
                                 this.lgp = ((pressedKeys["39"] || pressedKeys["37"]) ? [5 - this.facing * 10, 30 - this.facing * 10] : [5, 35]);
                             } else if(this.in("crouch")) {
                                 // Crawling
-                                // FIRST! Fix standing up when you turn
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     if((this.state == "crouch.idle" || this.state == "crouch.crawl") && this.facing == -1) {
                                         this.state = "crouch.turn";
@@ -402,16 +505,168 @@
                                 } else {
                                     // Slow down
                                     this.xvel *= 0.8;
+                                    this.builtSpeed = 0;
                                 }
                                 if(pressedKeys["38"]) {
                                     // Get up
+                                    this.goalAngle = 0;
                                     this.state = "stand.idle";
+                                }
+                                if(pressedKeys["90"]) {
+                                    // Charge pounce???
+                                    this.pounceCharge++;
+                                } else if(this.pounceCharge > 60) {
+                                    this.pounceCharge = 0;
+                                    // Leap!
+                                    this.state = "fall.leap";
+                                    this.xvel = this.facing * 15;
+                                    this.yvel = -8;
+                                    this.builtSpeed = 0;
+                                } else if(this.pounceCharge) {
+                                    this.pounceCharge = 0;
+                                    // A little jump
+                                    this.yvel = -4;
+                                    this.state = "fall.idle";
+                                    this.builtSpeed = 0;
                                 }
                                 
                                 // Angling
-                                this.goalAngle = this.facing * 90;
-                                if(this.state == "crouch.turn" && this.facing * 90 == this.angle) this.state = "crouch.idle";
+                                this.goalAngle = this.facing * (this.pounceCharge >= 60 ? 80 : 90);
+                                if(this.state == "crouch.turn" && this.facing * 90 == this.angle) {
+                                    this.state = "crouch.idle";
+                                    this.agpx = [50 * this.facing, 150 * this.facing];
+                                }
+                            } else if(this.in("climb")) {
+                                this.goalAngle = 0;
+                                this.yvel *= 0.9;
+                                if(pressedKeys["38"] && !pressedKeys["40"]) {
+                                    this.yvel -= 0.3;
+                                    this.state = "climb.climb";
+                                    this.facing = 1; // Not really "facing", but whatever
+                                    this.builtSpeed++;
+                                } else if(pressedKeys["40"]) {
+                                    this.yvel += 0.3;
+                                    this.state = "climb.climb";
+                                    this.facing = -1; // Not really "facing", but whatever
+                                    this.builtSpeed++;
+                                } else {
+                                    this.state = "climb.idle";
+                                    this.builtSpeed = 0;
+                                }
+                                if(pressedKeys["39"] && newKeys.includes(39) && this.climbSide == -1) {
+                                    // Flip to the right
+                                    this.climbSide = 1;
+                                    this.xpg = this.myPole.other + 5;
+                                    this.lgp = [-10, 0];
+                                } else if(pressedKeys["37"] && newKeys.includes(37) && this.climbSide == 1) {
+                                    // Flip to the left
+                                    this.climbSide = -1;
+                                    this.xpg = this.myPole.other - 40;
+                                    this.lgp = [35, 45];
+                                }
+                                if(pressedKeys["90"]) {
+                                    if(pressedKeys["38"]) {
+                                        if(!this.poleBoost) {
+                                            this.poleBoost = 40;
+                                            this.yvel = -10;
+                                        }
+                                    } else {
+                                        // Polejump
+                                        this.stopGrab = 20;
+                                        this.state = "fall.idle";
+                                        this.xpg = 0;
+                                        this.ypg = 0;
+                                        this.yvel = -6;
+                                        if(pressedKeys["37"] && this.climbSide == -1) this.xvel = -4;
+                                        else if(pressedKeys["39"] && this.climbSide == 1) this.xvel = 4;
+                                        else {this.xvel = 0; if(pressedKeys["40"]) {this.yvel = 1;} else {this.yvel = -1;}}
+                                    }
+                                }
+                            } else if(this.in("balance")) {
+                                if(pressedKeys["39"] && !pressedKeys["37"]) {
+                                    this.facing = 1;
+                                    this.state = "balance.lean";
+                                    this.goalAngle += 2;
+                                    this.builtSpeed++;
+                                } else if(pressedKeys["37"]) {
+                                    this.facing = -1;
+                                    this.state = "balance.lean";
+                                    this.goalAngle -= 2;
+                                    this.builtSpeed++;
+                                } else {
+                                    // Not moving either right or left
+                                    this.state = "balance.idle";
+                                    this.goalAngle *= 0.8;
+                                    this.builtSpeed *= 0.9;
+                                }
+                                this.goalAngle *= 0.95;
+                                // Now set agpx and agpy based on the rotatey stuff
+                                let one = rotate(this.body["armLS"].xpos, this.body["armLS"].ypos, -30, 30, this.angle);
+                                let too = rotate(this.body["armRS"].xpos, this.body["armRS"].ypos, 70, 30, this.angle);
+                                let len1 = Math.sqrt(
+                                    (one[0]-this.body["armLS"].xpos)*(one[0]-this.body["armLS"].xpos) +
+                                    (one[1]-this.body["armLS"].ypos)*(one[1]-this.body["armLS"].ypos)
+                                );
+                                one[0] = ((one[0] - this.body["armLS"].xpos) * (40 / len1)) + this.body["armLS"].xpos;
+                                one[1] = ((one[1] - this.body["armLS"].ypos) * (40 / len1)) + this.body["armLS"].ypos;
+                                let len2 = Math.sqrt(
+                                    (too[0]-this.body["armRS"].xpos)*(too[0]-this.body["armRS"].xpos) +
+                                    (too[1]-this.body["armRS"].ypos)*(too[1]-this.body["armRS"].ypos)
+                                );
+                                too[0] = ((too[0] - this.body["armRS"].xpos) * (40 / len2)) + this.body["armRS"].xpos;
+                                too[1] = ((too[1] - this.body["armRS"].ypos) * (40 / len2)) + this.body["armRS"].ypos;
+                                this.agpx = [one[0], too[0]];
+                                this.agpy = [one[1], too[1]];
+                                // I don't remember what this code does. :monkconfused:
+                                
+                                // Fall off the pole?
+                                if(Math.abs(this.angle) > 37 || pressedKeys["90"]) {
+                                    this.state = "fall.idle";
+                                    this.stopGrab = 20;
+                                    this.xpg = 0;
+                                    this.ypg = 0;
+                                    this.goalAngle = 0;
+                                    // Add'l stuff if you jumped off
+                                    if(pressedKeys["90"]) {
+                                        this.yvel = -6;
+                                        if(pressedKeys["37"] && this.facing == -1) this.xvel = -4;
+                                        else if(pressedKeys["39"] && this.facing == 1) this.xvel = 4;
+                                        else {this.xvel = 0; this.yvel = -1;}
+                                    }
+                                }
                             }
+                            // END CONTROLS CHECK
+                            
+                            // I didn't want to bother writing `this.myPole = null` all the time
+                            if(!this.in("climb") && !this.in("balance")) this.myPole = null;
+                            
+                            // Poles!
+                            if(pressedKeys["38"] && (this.in("fall") || this.in("stand")) && !this.stopGrab) {
+                                for(let p of this.room.poles.filter(x => x.dir == "v")) { // LARGE! Horizontal poles
+                                    if(this.onPole(p)) {
+                                        this.myPole = p;
+                                        // Apply some initial y velocity to keep from just standing back up
+                                        this.yvel = -3;
+                                        // Stop xvel
+                                        this.xvel = 0;
+                                        this.state = "climb.idle";
+                                        // Snap
+                                        if((this.xpos + 20) > p.other) {
+                                            this.climbSide = 1;
+                                            this.xpos = p.other + 5;
+                                        } else {
+                                            this.climbSide = -1;
+                                            this.xpos = p.other - 40;
+                                        }
+                                        // Arms up! Legs in!
+                                        this.agpy = [-40, -20];
+                                        this.lgp = (this.climbSide == 1 ? [-10, 0] : [35, 45]);
+                                    }
+                                }
+                            }
+                            
+                            // I didn't want to bother writing `this.myPole = null` all the time
+                            if(!this.in("climb") && !this.in("balance")) this.myPole = null;
                             
                             // Stun timer
                             if(this.stunTime) {
@@ -424,8 +679,8 @@
                             }
                             
                             // Tilt
-                            if((this.in("stand") || (this.in("fall") && this.state != "fall.slide")) && !this.colliding) {
-                                this.btgp = 2 * this.xvel;
+                            if((this.in("stand") || (Math.abs(this.angle) < 70 && this.in("fall") && this.state != "fall.slide")) && !this.colliding) {
+                                this.btgp += 5 * this.xvel;
                             }
                             
                             // Horizontal movement
@@ -434,27 +689,28 @@
                                 //alert("Xvel contact.");
                                 // Try to just walk upwards
                                 let checks = 0;
+                                let xc = -0.1, yc = -0.4;
                                 while(checks < 10 && this.contact() && !this.in("fall")) { // No, you can't WALK up while FALLING
-                                    this.xpos -= 0.1 * this.xvel;
-                                    this.ypos -= 0.2 * this.xvel;
+                                    this.xpos += xc * this.xvel;
+                                    this.ypos += yc * Math.abs(this.xvel);
                                     checks++;
                                 }
                                 if(checks == 10 || this.in("fall")) {
                                     // Aww... Undo that
-                                    //this.xpos -= this.xvel;
-                                    this.xpos -= 0.1 * (10 - checks) * this.xvel;
-                                    this.ypos += 0.2 * checks * this.xvel;
+                                    this.xpos -= this.xvel;
+                                    this.ypos -= yc * checks * Math.abs(this.xvel);
+                                    this.xpos -= xc * checks * this.xvel;
                                     if(this.in("stand")) {
                                         if(this.xvel > 0) {
-                                            this.lgp = [30, 35];
+                                            this.lgp = [25, 35];
                                         } else {
-                                            this.lgp = [5, 10];
+                                            this.lgp = [5, 15];
                                         }
                                     }
                                     // Wall sliding - reduce yvel & put into WS state
                                     if(this.in("fall") && ((pressedKeys["39"] && this.xvel > 0) || (pressedKeys["37"] && this.xvel < 0))) {
                                         this.state = "fall.slide";
-                                        this.yvel *= 0.8;
+                                        this.yvel *= 0.5;
                                         this.colliding = 5; // Stop BTGP for a few frames
                                         let b = this.btgp;
                                         this.btgp = 0;
@@ -466,9 +722,18 @@
                                     this.xvel *= 0.8;
                                 }
                             } else { this.colliding = Math.max(0, this.colliding - 1); }
+                            if(this.stopGrab) this.stopGrab--;
                             // Horizontal friction
                             if(this.in("fall")) this.xvel *= 0.98;
                             else this.xvel *= 0.95;
+                            
+                            // Yvel check: when moving upwards, cancel if jump isn't held
+                            if(this.yvel < 0 && !pressedKeys["90"] && !this.in("climb")) this.yvel *= 0.8;
+                            // Another yvel check: pole boosting
+                            if(this.poleBoost) {
+                                this.poleBoost--;
+                                if(this.poleBoost > 5 && this.poleBoost < 25) this.yvel *= 0.8;
+                            }
                             
                             // Vertical movement
                             this.ypos += this.yvel + 3;
@@ -488,7 +753,8 @@
                                     this.ypos -= this.yvel;
                                 }
                                 if(this.yvel > 20) { // THINK! Figure out the right fall stun threshold
-                                    this.stun(5 * (this.yvel - 15));
+                                    // i gotta actually implement stunning before this is useful
+                                    //this.stun(5 * (this.yvel - 15));
                                 } else if(this.state != "fall.slide" && !this.in("crouch")) {
                                     // Just move around a little to make sure nothing weird is happening
                                     let c1 = this.contact();
@@ -496,7 +762,12 @@
                                     let c = this.contact();
                                     this.xvel -= this.facing * 3;
                                     //alert("Ouch! c1="+c1+" c="+c);
-                                    if(!c1 && !c) this.state = "stand.idle";
+                                    if(!c1 && !c) {
+                                        if(Math.abs(this.angle) > 70) {
+                                            this.state = "crouch.idle";
+                                            this.agpx = [50 * this.facing, 150 * this.facing];
+                                        } else this.state = "stand.idle";
+                                    }
                                 } else if(this.state == "fall.slide") {
                                     // You probably just slid down to the ground
                                     //alert("Slidedown");
@@ -505,49 +776,65 @@
                                 this.yvel = 0;
                             } else if(this.in("fall")) {
                                 this.yvel += 0.2; // Gravity
-                            } else if(this.contact() && this.yvel >= 0 && this.state != "stand.walk" && !this.in("crouch")) {
-                                // Climbing up
-                                this.ypos -= 5;
-                                // Put in crouch-state after climbing up
-                                this.state = "crouch.idle";
+                            } else if(this.in("climb")) {
+                                if(this.myPole.dir == "v" && (this.ypos + 10) < this.myPole.start) {
+                                    // Balance on the pole
+                                    this.state = "balance.idle";
+                                    this.xpg = (this.myPole.other - 20);
+                                    this.ypg = (this.myPole.start - 80);
+                                    // Set legs & arms
+                                    this.lgp = [10, 30];
+                                    this.agpx = [-30, 70];
+                                    this.agpy = [30, 30];
+                                    this.xvel = 0;
+                                    this.yvel = 0;
+                                }
                             }
                             // Did you just walk off the edge
                             this.ypos += 3;
-                            if(!this.contact() && !this.in("fall")) {
+                            if(!this.contact() && !this.in("fall") && !this.in("climb") && !this.in("balance")) {
                                 this.state = "fall.idle";
+                                this.builtSpeed = 0;
                             }
                             this.ypos -= 6;
+                            
+                            // Climbing down to the bottom of a pole
+                            if(this.contact() && this.in("climb")) {
+                                this.state = "stand.idle";
+                                this.yvel = -5;
+                                this.ypos += 2 * this.yvel;
+                                this.xpg = 0;
+                            }
                             
                             // Changing angle
                             let speed = (this.in("stun") ? 10 : 5);
                             let oa = this.angle;
+                            let finished = this.angle == this.goalAngle;
                             if(this.angle < this.goalAngle) {
                                 this.angle = Math.min(this.goalAngle, this.angle + speed);
                             } else {
                                 this.angle = Math.max(this.goalAngle, this.angle - speed);
                             }
-                            if(this.contact()) {
+                            if(this.contact() && !finished) {
                                 this.angle = oa + (oa > 0 ? -1 : 1);
-                                this.goalAngle = 0;
-                                //alert(this.state+" « before »");
-                                if(this.state == "crouch.idle") {this.state = "stand.idle";}
-                                //alert(this.state+" « after »");
+                                this.xvel = this.facing * -4;
+                                this.xpos += this.xvel;
+                                //this.goalAngle = 0;
+                                //if(this.state == "crouch.idle" || this.state == "crouch.turn") {this.state = "stand.idle";}
                             }
-                            let cx = 5, cy = (this.facing == 1 ? 60 : 90);
+                            let cx = (this.angle > 0 ? 35 : 5), cy = (this.angle > 0 ? 90 : 90);
                             for(let i of Object.values(this.body)) {
                                 i.cx = cx; i.cy = cy;
                             }
                             
                             // Moving forward - make the legs move back, then check if they need to be moved forward
                             if(this.state == "stand.walk") {
+                                this.lgp[0] -= this.xvel;
+                                this.lgp[1] -= this.xvel;
                                 if(this.facing == 1) {
-                                    this.lgp[0] -= this.xvel;
-                                    this.lgp[1] -= this.xvel;
                                     if(this.lgp[0] <= -20) this.lgp[0] = 60;
                                     if(this.lgp[1] <= -20) this.lgp[1] = 60;
                                 } else {
-                                    this.lgp[0] -= this.xvel;
-                                    this.lgp[1] -= this.xvel;
                                     if(this.lgp[0] >= 60) this.lgp[0] = -20;
                                     if(this.lgp[1] >= 60) this.lgp[1] = -20;
                                 }
@@ -561,18 +848,66 @@
                                 }
                             }
                             
-                            // Right now, I don't need to use `this.agp`, but it'll be relevant later
+                            // For crouching, "walk" with the arms
+                            if(this.state == "crouch.crawl") { // Weird name but ok
+                                this.agpx[0] -= this.xvel;
+                                this.agpx[1] -= this.xvel;
+                                if(this.facing == 1) {
+                                    if(this.agpx[0] <= 100) this.agpx[0] = 180;
+                                    if(this.agpx[1] <= 100) this.agpx[1] = 180;
+                                } else {
+                                    if(this.agpx[0] >= -60) this.agpx[0] = -140;
+                                    if(this.agpx[1] >= -60) this.agpx[1] = -140;
+                                }
+                            }
+                            // And make sure the arms aren't weirdly in the air
+                            if(this.in("crouch")) this.agpy = [90, 90];
                             
-                            // Now use `this.lgp`, `this.agp`, and `this.btgp` to move the actual stuff
-                            for(let i of [["legLE", this.lgp[0]], ["legRE", this.lgp[1]], ["armLE", this.agp[0]], ["armRE", this.agp[1]]]) {
-                                if(this.contact()) continue;
-                                this.body[i[0]].xpos += 0.1 * (i[1] - this.body[i[0]].xpos);
-                                if(this.contact()) {
-                                    this.body[i[0]].xpos -= 0.1 * (i[1] - this.body[i[0]].xpos);
+                            // Climbing - do the same as above, but upwards
+                            if(this.state == "climb.climb") { // Weird name but ok
+                                this.agpy[0] -= this.yvel;
+                                this.agpy[1] -= this.yvel;
+                                if(this.facing == -1) { // Up
+                                    if(this.agpy[0] <= -20) this.agpy[0] = 60;
+                                    if(this.agpy[1] <= -20) this.agpy[1] = 60;
+                                } else {
+                                    if(this.agpy[0] >= 60) this.agpy[0] = -20;
+                                    if(this.agpy[1] >= 60) this.agpy[1] = -20;
+                                }
+                            }
+                            // Also do the X
+                            if(this.in("climb")) {
+                                if(this.climbSide == 1) {
+                                    this.agpx = [-10, 0];
+                                } else {
+                                    this.agpx = [30, 40];
                                 }
                             }
                             
-                            if((this.in("stand") || this.in("fall")) && Math.abs(this.angle) < 1) {
+                            // It would look a little weird if I just hid the arms, so I'll do this instead
+                            if(!this.in("crouch") && !this.in("climb") && !this.in("balance")) {
+                                this.agpx = [20 + this.btgp * 1, 20 + this.btgp * 1];
+                                this.agpy = [30, 30];
+                            }
+                            
+                            // Now use `this.lgp`, `this.agpx`, `this.agpy`, and `this.btgp` to move the actual stuff
+                            if(!this.contact()) {
+                                this.body.legLE.xpos += 0.1 * (this.lgp[0] - this.body.legLE.xpos);
+                                if(this.contact()) this.body.legLE.xpos -= 0.1 * (this.lgp[0] - this.body.legLE.xpos);
+                            }
+                            if(!this.contact()) {
+                                this.body.legRE.xpos += 0.1 * (this.lgp[1] - this.body.legRE.xpos);
+                                if(this.contact()) this.body.legRE.xpos -= 0.1 * (this.lgp[1] - this.body.legRE.xpos);
+                            }
+                            
+                            // AGP (X and Y)
+                            this.body.armLE.xpos += 0.1 * (this.agpx[0] - this.body.armLE.xpos);
+                            this.body.armRE.xpos += 0.1 * (this.agpx[1] - this.body.armRE.xpos);
+                            this.body.armLE.ypos += 0.1 * (this.agpy[0] - this.body.armLE.ypos);
+                            this.body.armRE.ypos += 0.1 * (this.agpy[1] - this.body.armRE.ypos);
+                            
+                            // BTGP
+                            if((this.in("stand") || this.in("fall") || this.in("balance")) && Math.abs(this.angle) < 1) {
                                 this.body.bodyTL.xpos += 0.1 * (this.btgp + 5 - this.body.bodyTL.xpos);
                                 this.body.bodyTR.xpos += 0.1 * (this.btgp + 35 - this.body.bodyTR.xpos);
                                 this.body.earLS.xpos += 0.1 * (this.btgp + 5 - this.body.earLS.xpos);
@@ -593,8 +928,14 @@
                                 this.body.eyeL.xpos += this.btgp + 9 - this.body.eyeL.xpos;
                                 this.body.eyeR.xpos += this.btgp + 31 - this.body.eyeR.xpos;
                                 this.body.nouth.xpos += this.btgp + 20 - this.body.nouth.xpos;
-                                this.btgp = 0;
                             }
+                            
+                            let df = (this.xpg ? 0.3 * (this.xpg - this.xpos) : 0);
+                            this.xpos += df;
+                            // What did df stand for again?
+                            let dg = (this.ypg ? 0.3 * (this.ypg - this.ypos) : 0);
+                            this.ypos += dg;
+                            this.df2 -= 0.05 * (this.df2 - df);
                             
                             // Angle stuff
                             // Rotate most things about SC's center (20, 35)
@@ -607,13 +948,16 @@
                             for(let i=1; i<15; i++) {
                                 if(this.tail.length <= i) this.tail.push(this.tail[i - 1]);
                                 let otx = this.tail[i-1][0], oty = this.tail[i-1][1], tx = this.tail[i][0] - otx, ty = this.tail[i][1] - oty;
-                                tx += (this.facing == 1 ? -7 : 7);
-                                ty += 4;
+                                if(!this.in("climb") && !this.in("balance")) tx += (this.facing == 1 ? -4 : 4);
+                                tx += 3 * this.df2;
+                                tx -= this.btgp;
+                                // When crouching, weird stuff can happen sometimes
+                                if(this.in("crouch")) ty += 0.1; else ty += 8;
                                 
                                 let dx = otx + tx + this.xpos, dy = oty + ty + this.ypos, MAXDIST = 10 - 0.5 * i;
                                 while(new Rectangle(dx - MAXDIST, dy - MAXDIST, MAXDIST * 2, MAXDIST * 2).touches(this.room.hitbox)) {
                                     ty -= 1;
-                                    tx -= -1 * this.facing;
+                                    tx -= this.facing;
                                     // Recalc!
                                     dx = otx + tx + this.xpos; dy = oty + ty + this.ypos;
                                 }
@@ -626,11 +970,16 @@
                                 }
                                 this.tail[i] = [otx + tx, oty + ty];
                             }
+                            //this.btgp = 0; // Add this later; but I want to be logging it for now!
+                            //if(!this.in("climb") && !this.in("balance") && this.myPole != null) alert("Eek!");
                         }
                     );
                     
                     this.lgp = [5, 35]; // Leg Goal Pos - where I want to put the legs
-                    this.agp = [10, 30]; // Arm Goal Pos - where I want to put the arms
+                    this.agpx = [10, 30]; // Arm Goal Pos - where I want to put the arms
+                    this.agpy = [0, 0]; // same, but for Y position
+                    this.xpg = 0; // X position goal
+                    this.ypg = 0; // Y position goal
                     this.btgp = 0; // Body Top Goal Pos
                     this.facing = 1; // 1 or -1
                     this.xvel = 0;
@@ -640,12 +989,24 @@
                     this.angle = 0, this.goalAngle = 0; // Where you want to turn
                     this.stunTime = 0;
                     this.colliding = 0; // Whether to stop BTGP due to a collision
+                    this.myPole = null; // Pole you're currently climbing on
+                    this.climbSide = 0; // Which side you're climbing on, only relevant while in `climb.*`
+                    this.df2 = 0; // This is related to the tail somehow. Don't even try asking me what it stands for
+                    this.stopGrab = 0;
+                    this.poleBoost = 0; // Boosting up poles
+                    this.pounceCharge = 0;
                 }
                 stun(time) {
                     // Set state & timer
                     this.state = "stun.idle";
                     this.stunTime = time;
                     // LATER! Drop what you're holding
+                }
+                doHands() {
+                    if(!this.in("climb")) return;
+                    // Put hands a layer above poles
+                    circle(this.bodyCoords("armLE"), 5, "white");
+                    circle(this.bodyCoords("armRE"), 5, "white");
                 }
             }
             
@@ -654,28 +1015,37 @@
             try {
                 let startRoom = new Room(
                     // FG MG BG
-                    [new Rectangle(300, 50, 100, 250, "#633")],
+                    [new Rectangle(1060, 50, 80, 250, "#633")],
                     [
                         new Rectangle(10, 50, 80, 350, "#363"),
-                        new Rectangle(900, 50, 80, 350, "#363"),
-                        new Rectangle(110, 320, 700, 80, "#363"),
-                        new Polygon([[250, 320], [280, 250], [330, 320]], "#363"), // Wtf is this
+                        new Rectangle(900, 50, 80, 250, "#363"),
+                        new Rectangle(90, 320, 420, 80, "#363"),
+                        new Rectangle(430, 470, 80, 120, "#383"),
+                        //new Polygon([[260, 320], [280, 250], [360, 320]], "#363"), // Wtf is this
+                        new Rectangle(430, 590, 900, 80, "#363")
                     ],
-                    [new Rectangle(500, 50, 100, 250, "#336")]
+                    [new Rectangle(980, 50, 80, 250, "#336")],
+                    // Poles: Start, end, other, dir
+                    [new Pole(200, 590, 750, "v")]
                 );
                 rooms.push(startRoom);
-                SC = new Player(startRoom);
+                // Initialize player
+                SC = new Player(startRoom, 150, 50);
+                // Spawn a liz
+                let lizor = new PinkLizard(startRoom, 1100, 350);
             } catch(e) { alert("Error in init: " + e); }
             
             function frame(globalTimer) { try {
                 ctx.clearRect(0, 0, 1350, 630);
+                // LARGE! More rooms? More cameras? Scrolling!?
                 SC.room.render();
                 for(let i of rooms) {
                     for(let j of i.entities) { j.tick(); }
                 }
                 newKeys = [];
                 
-                document.getElementById("sayer").innerHTML = `state=${SC.state} facing=${SC.facing} vel=(${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos=(${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle=${SC.angle} (${SC.goalAngle}) hb=${SC.getHitbox().touches(SC.room.hitbox)} bspeed=${SC.builtSpeed.toFixed(0)}`;
+                document.getElementById("sayer").innerHTML = `facing=${SC.facing} vel=(${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos=(${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle=${SC.angle.toFixed(0)} (${SC.goalAngle.toFixed(0)}) hb=${SC.getHitbox().touches(SC.room.hitbox)} btgp=${SC.btgp.toFixed(0)} mp=${SC.myPole} bspeed=${SC.builtSpeed.toFixed(0)} state=${SC.state} inputs=${Object.keys(pressedKeys).filter(x=>pressedKeys[x])}`;
+                SC.btgp = 0; // Delete this later!
                 
                 window.requestAnimationFrame(frame);
             } catch(e) { alert("Error in frame(): " + e); } }
@@ -691,7 +1061,7 @@
         </script>
     </head>
     <body onload="loaded()">
-        <div id="sayer">an experiment in animation</div>
+        <div id="sayer">something has gone very wrong</div>
         <canvas id="canv" width="1350" height="630"></canvas>
     </body>
 </html>
