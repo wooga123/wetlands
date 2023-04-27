@@ -11,7 +11,7 @@
             }
         </style>
         <script>
-            const VERSION = "v0.0.3"; // It's gonna be awhile before this is relevant
+            const VERSION = "v0.0.3.1"; // It's gonna be awhile before this is relevant
             document.getElementById("titell").textContent = "wetlands " + VERSION;
             let ctx;
             
@@ -759,9 +759,9 @@
                                 // I don't remember what this code does. :monkconfused:
                                 
                                 // Fall off the pole?
-                                if(Math.abs(this.angle) > 37 || pressedKeys["90"]) {
+                                if(Math.abs(this.angle) > 36 || pressedKeys["90"]) {
                                     this.state = "fall.idle";
-                                    this.stopGrab = 20;
+                                    this.stopGrab = 30;
                                     this.xpg = 0;
                                     this.ypg = 0;
                                     this.goalAngle = 0;
@@ -771,7 +771,7 @@
                                         if(pressedKeys["37"] && this.facing == -1) this.xvel = -4;
                                         else if(pressedKeys["39"] && this.facing == 1) this.xvel = 4;
                                         else {this.xvel = 0; this.yvel = -1;}
-                                    }
+                                    } else this.xvel = this.facing * 1;
                                 }
                             } else if(this.in("roll")) {
                                 // Rolling is complicated.
@@ -927,7 +927,6 @@
                                     }
                                 } else if(this.state == "fall.slide") {
                                     // You probably just slid down to the ground
-                                    //alert("Slidedown");
                                     this.state = "stand.idle";
                                 }
                                 this.yvel = 0;
@@ -956,9 +955,7 @@
                                 this.builtSpeed = 0;
                                 if(this.noFall) {
                                     this.ypos -= 90; this.noFall = false;
-                                    alert("boink");
                                 }
-                                //alert("fallo");
                             }
                             if(this.noFall) this.ypos -= 5;
                             this.ypos -= 6;
@@ -985,14 +982,12 @@
                                 this.angle = Math.max(this.goalAngle, this.angle - speed);
                             }
                             if(this.contact() && !finished && !was) {
-                                alert("mehh");
                                 if(this.in("stand") && Math.abs(this.angle) > 50) {
                                     // You probably tried to stand up when you really shouldn't have, get back down there!
                                     this.goalAngle = 90 * (this.angle > 0 ? 1 : -1);
                                     this.angle = this.goalAngle;
                                     this.state = "crouch.idle";
                                 } else {
-                                    alert("what is this? why did it happen?");
                                     this.angle = oa + (oa > 0 ? -1 : 1);
                                     this.xvel = this.facing * -4;
                                     this.xpos += this.xvel;
@@ -1011,12 +1006,12 @@
                                 this.ypos -= 40;
                             }
                             if(this.in("roll") && this.facing == -1 && this.angle == -90 && this.goalAngle <= -360) {
-                                alert("rollyLLLL");
+                                //alert("rollyLLLL");
                                 this.xpos -= 70;
                                 this.ypos += 40;
                                 this.noFall = true;
                             } else if(this.noFall && this.facing == -1 && this.angle == 90) {
-                                alert("rollBACK_LLLL");
+                                //alert("rollBACK_LLLL");
                                 this.noFall = false;
                                 this.xpos -= 50;
                                 this.ypos -= 40;
@@ -1230,7 +1225,8 @@
                         new Rectangle(430, 470, 80, 120, "#383"),
                         //new Polygon([[260, 320], [280, 250], [360, 320]], "#363"), // Wtf is this
                         new Rectangle(430, 590, 900, 80, "#363"),
-                        new Rectangle(100, 470, 330, 120, "#393")
+                        new Rectangle(100, 470, 330, 120, "#393"),
+                        new Rectangle(900, 510, 80, 80, "353")
                     ],
                     [new Rectangle(980, 50, 80, 250, "#336")],
                     // Poles: Start, end, other, dir
