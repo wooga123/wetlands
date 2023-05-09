@@ -11,9 +11,10 @@
             }
         </style>
         <script>
-            const VERSION = "v0.0.3.1"; // It's gonna be awhile before this is relevant
+            let VERSION = "v0.0.4-alpha"; // It's gonna be awhile before this is relevant
             document.getElementById("titell").textContent = "wetlands " + VERSION;
-            let ctx;
+            let ctx, elapsedTime = 0;
+            let mousey = 0, mousex = 0;
             
             let pressedKeys = {};
             window.onkeyup = function(e) { pressedKeys[e.keyCode] = false; }
@@ -21,8 +22,8 @@
             
             // found on stackoverflow
             function rotate(centerx, centery, x, y, degrees) {
-                var newx = (x - centerx) * Math.cos(degrees * Math.PI / 180) - (y - centery) * Math.sin(degrees * Math.PI / 180) + centerx;
-                var newy = (x - centerx) * Math.sin(degrees * Math.PI / 180) + (y - centery) * Math.cos(degrees * Math.PI / 180) + centery;
+                let newx = (x - centerx) * Math.cos(degrees * Math.PI / 180) - (y - centery) * Math.sin(degrees * Math.PI / 180) + centerx;
+                let newy = (x - centerx) * Math.sin(degrees * Math.PI / 180) + (y - centery) * Math.cos(degrees * Math.PI / 180) + centery;
                 return [newx, newy];
             }
             
@@ -165,7 +166,7 @@
             
             class Hitbox {
                 // A group of shapes, handy for making hitboxes
-                constructor(s, uo = [], r = "") {
+                constructor(s, uo = [], r = 0) {
                     let shapes = (s[0] ? s : [s]);
                     this.shapes = shapes;
                     this.ignoreUUIDs = uo;
@@ -195,42 +196,87 @@
                     this.background = bg;
                     this.poles = p;
                     this.hitbox = new Hitbox(mg);
-                    // The entities in the room
-                    this.entities = [];
+                    this.entities = []; // The entities in the room
+                    this.width = 1350; // Will be configurable later
+                    this.height = 630; // Will be configurable later
+                    this.grids = {};
                 }
                 render() {
                     for(let i of this.background) {i.render();}
                     for(let j of this.entities) {j.render();}
                     for(let p of this.poles) {p.render();}
                     // For the SC specifically, render the hands on top
-                    if(SC.room == this) {
-                        SC.doHands();
-                    }
+                    if(SC.room == this) SC.doHands();
                     for(let l of this.midground) {l.render();}
                     for(let k of this.foreground) {k.render();}
+                }
+                grid(by, big = 10, strict = 0, liz = false) {
+                    if(this.grids[strict+"»"+big+"»"+by]) return this.grids[strict+"»"+big+"»"+by];
+                    let grid = [];
+                    for(let i=0; i<=this.height/big; i++) {
+                        grid.push([]);
+                        for(let j=0; j<=this.width/big; j++) {
+                            let h = new Hitbox(new Rectangle(big * j - strict, big * i - strict, big + strict * 2, big + strict * 2), [by], this);
+                            let c = h.contact();
+                            if(liz) {
+                                let s2 = strict + 50;
+                                // DON'T stop hitbox check from checking the lizard itself, otherwise it will start in midair
+                                let h2 = new Hitbox(new Rectangle(big * j - s2, big * i - s2, big + s2 * 2, big + s2 * 2), [], this);
+                                let c2 = h2.contact();
+                                grid[i].push((c || !c2) ? true : false);
+                            } else {
+                                grid[i].push(c ? true : false);
+                            }
+                        }
+                    }
+                    this.grids[strict+"»"+big+"»"+by] = grid;
+                    return grid;
                 }
             }
             
             class Position {
                 // A really simple class
-                constructor(x, y, a=0, cx=0, cy=0, rx=0, ry=0) {
+                constructor(x, y, a=0, cx=0, cy=0, a2=0, cx2=0, cy2=0) {
                     this.REAL_xpos = x;
                     this.REAL_ypos = y;
                     this.cx = cx;
                     this.cy = cy;
                     this.angle = a;
+                    this.secondCx = cx2;
+                    this.secondCy = cy2;
+                    this.secondAngle = a2;
                     this.owner = null;
                 }
                 
                 get xpos() {
-                    return rotate(this.cx, this.cy, this.REAL_xpos, this.REAL_ypos, this.angle)[0];
+                    return rotate(this.secondCx, this.secondCy, ...rotate(this.cx, this.cy, this.REAL_xpos, this.REAL_ypos, this.angle), this.secondAngle)[0];
                 }
                 set xpos(v) {this.REAL_xpos = v;}
                 
                 get ypos() {
-                    return rotate(this.cx, this.cy, this.REAL_xpos, this.REAL_ypos, this.angle)[1];
+                    return rotate(this.secondCx, this.secondCy, ...rotate(this.cx, this.cy, this.REAL_xpos, this.REAL_ypos, this.angle), this.secondAngle)[1];
                 }
                 set ypos(v) {this.REAL_ypos = v;}
+            }
+            
+            class PathfinderPoint {
+                constructor(x, y) {
+                    this.x = x;
+                    this.y = y;
+                    this.f = 0; // I have no //
+                    this.g = 0; // idea what //
+                    this.h = 0; // these are //
+                    this.neighbors = [];
+                    this.parent = undefined;
+                }
+                neighbify(g) {
+                    let n = [];
+                    if(this.y) n.push(g[this.y - 1][this.x]);
+                    if(this.y + 1 < g.length) n.push(g[this.y + 1][this.x]);
+                    if(this.x) n.push(g[this.y][this.x - 1]);
+                    if(this.x + 1 < g[0].length) n.push(g[this.y][this.x + 1]);
+                    return n;
+                }
             }
             
             class AbstractEntity {
@@ -249,6 +295,7 @@
                         i.owner = this;
                     }
                     this.dead = false;
+                    this.completePath = false;
                     this.getHitbox = g;
                     this.render = re;
                     this.tick = t;
@@ -266,10 +313,88 @@
                     return this.state.includes(state + ".");
                 }
                 onPole(p, w = "") {
-                    // Check if the entity is on a pole
+                    // Check if the entity is colliding with a pole
                     return this.getHitbox(w).touches(new Rectangle(...(
                         p.dir == "h" ? [p.start, p.other - 1, p.end - p.start, 2] : [p.other - 1, p.start, 2, p.end - p.start]
                     )));
+                }
+                canSee(other) {
+                    // Get the line of sight from this to other, and see if it's obstructed.
+                    // LATER! Maybe try to check all the body chunks? I'll just do the real position for now
+                    let line = new Polygon([this.centerPos, other.centerPos]);
+                    return !(new Hitbox(line, [this.uuid, other.uuid]).contact()); // LATER! maybe try to allow partial vision through entities
+                }
+                pathfind(goalPoint, bigness = 10, strictness = 0, maxMs = 50, liz = false) {
+                    let t1 = Date.now();
+                    // Set up points
+                    // Hmm............................ does this part need to be (x, y)?
+                    let grid = this.room.grid(this.uuid, bigness, strictness, liz).map((x,a)=>x.map((y,b)=>new PathfinderPoint(b, a)));
+                    // Might want to try diagonals?
+                    let heuristic = (p0, p1) => Math.abs(p1.x - p0.x) + Math.abs(p1.y - p0.y);
+                    // end = pos of goal point
+                    // start = where u are now
+                    // openSet = start
+                    // closedSet = untraversable points / already traversed points
+                    // grid = 2D array, of columns then rows
+                    
+                    // Search code, found on [dev.to/codesphere/pathfinding-with-javascript-the-a-algorithm-3jlb]
+                    let x = Math.min(this.room.width, Math.max(0, this.xpos));
+                    let y = Math.min(this.room.height, Math.max(0, this.ypos));
+                    let gx = Math.min(this.room.width, Math.max(0, goalPoint[0]));
+                    let gy = Math.min(this.room.height, Math.max(0, goalPoint[1] + (liz ? 50 : 0)));
+                    let end = grid[Math.floor(gy / bigness)][Math.floor(gx / bigness)];
+                    let start = grid[Math.floor(y / bigness)][Math.floor(x / bigness)], path = [], openSet = [start], closedSet = [];
+                    for(let i=0; i<grid.length; i++) {
+                        for(let j=0; j<grid[0].length; j++) {
+                            grid[i][j].neighbify(grid);
+                        }
+                    }
+                    
+                    let current;
+                    while(openSet.length > 0) {
+                        let li = 0;
+                        for(let i = 0; i < openSet.length; i++) {
+                            if(openSet[i].f < openSet[li].f) li = i;
+                        }
+                        current = openSet[li];
+                        if(current == end || (liz && heuristic(current, end) < 5)) {
+                            let temp = current;
+                            path.push(temp);
+                            while(temp.parent) {path.push(temp.parent); temp = temp.parent;}
+                            this.completePath = true;
+                            return path.reverse();
+                        }
+                        openSet.splice(li, 1);
+                        closedSet.push(current);
+                        let neighbors = current.neighbify(grid);
+                        for(let i = 0; i < neighbors.length; i++) {
+                            let n = neighbors[i];
+                            if(!closedSet.includes(n) && (!this.room.grid(this.uuid, bigness, strictness, liz)[n.y][n.x] || n == end)) {
+                                let possibleG = current.g + 1;
+                                if(!openSet.includes(n)) openSet.push(n);
+                                else if(possibleG >= n.g) continue;
+                                n.g = possibleG;
+                                n.h = heuristic(n, end);
+                                n.f = n.g + n.h;
+                                n.parent = current;
+                            }
+                        }
+                        // If it takes too long, give up to avoid lagging the rest of the program
+                        if(maxMs && (Date.now() - t1) >= maxMs) {
+                            //alert("FAILED TO FINISH IN " + maxMs + "MS - RETURNING CURRENT PATH");
+                            let temp = current;
+                            path.push(temp);
+                            while(temp.parent) {path.push(temp.parent); temp = temp.parent;}
+                            this.completePath = false;
+                            return path.reverse();
+                        }
+                    }
+                    // Can't quite make it. Get as far as you can?
+                    let temp = current;
+                    path.push(temp);
+                    while(temp.parent) {path.push(temp.parent); temp = temp.parent;}
+                    this.completePath = false;
+                    return path.reverse();
                 }
             }
             
@@ -286,18 +411,21 @@
                             headBB: new Position(80, 70),
                             headI: new Position(70, 50),
                             eye: new Position(7, 7),
+                            mid1T: new Position(130, 30),
+                            mid1B: new Position(130, 70),
+                            mid2T: new Position(200, 30),
+                            mid2B: new Position(200, 70),
                             backT: new Position(300, 30),
                             backB: new Position(300, 70),
-                            legFLS: new Position(120, 70),
-                            legFLE: new Position(120, 100),
-                            legBLS: new Position(220, 70),
-                            legBLE: new Position(220, 100),
-                            legFRS: new Position(160, 70),
-                            legFRE: new Position(160, 100),
-                            legBRS: new Position(260, 70),
-                            legBRE: new Position(260, 100)
-                            // LATER! Chunked body
-                        }, function() {
+                            legFLS: new Position(140, 70),
+                            legFLE: new Position(140, 100),
+                            legBLS: new Position(240, 70),
+                            legBLE: new Position(240, 100),
+                            legFRS: new Position(180, 70),
+                            legFRE: new Position(180, 100),
+                            legBRS: new Position(280, 70),
+                            legBRE: new Position(280, 100)
+                        }, function(w = "default") {
                             // get hitbox ugh
                             return new Polygon([
                                 // I could have added all the legs in the hitbox but didn't feel like it
@@ -323,7 +451,7 @@
                             line(this.bodyCoords("legFRS"), this.bodyCoords("legFRE"), this.secondary);
                             line(this.bodyCoords("legBRS"), this.bodyCoords("legBRE"), this.secondary);
                             // Body
-                            drawBody(this, ["headBB", "headTB", "backT", "backB"], 7, "black");
+                            drawBody(this, ["headBB", "headTB", "mid1T", "mid2T", "backT", "backB", "mid2B", "mid1B"], 7, "black");
                             // Head
                             drawBody(this, ["headTU", "headBU", "headI", "headTL", "headBL", "headBB", "headTB"], 7, this.primary);
                             circle(this.bodyCoords("eye"), 5);
@@ -333,15 +461,151 @@
                             
                             // ---- Step 1: Find Goal
                             // Sort visible creatures by distance and edibility/danger
-                            // Get best (closest & most edible/dangerous) creature
-                            // If no visible edible/dangerous creatures, just get a better vantage point
+                            let visibles = this.room.entities.filter(x=>x.uuid!=this.uuid/*&&this.canSee(x)*/);
+                            for(let i of visibles) {
+                                this.memories[i.uuid] = {uuid: i.uuid, obj: i, pos: i.centerPos, time: elapsedTime};
+                            }
+                            
+                            if(Object.values(this.memories).length && !visibles.length) {
+                                //alert(`${this.id}${this.uuid.toString().slice(2, 7)} says: I am tracking you`);
+                            }
+                            
+                            // Draw lines (PURELY GRAPHICAL, CAN BE REMOVED LATER)
+                            let shouldDraw = true;
+                            if(shouldDraw) {
+                                ctx.lineWidth = 3;
+                                for(let j of Object.values(this.memories)) {
+                                    let oldness = 1 - 0.0001 * (elapsedTime - j.time);
+                                    line(this.centerPos, j.pos, "rgba(255, 255, 0, " + oldness + ")");
+                                }
+                                for(let i of this.room.entities.filter(x=>x.uuid!=this.uuid)) {
+                                    let cs = this.canSee(i);
+                                    line(this.centerPos, i.centerPos, (cs ? "lime" : "red"));
+                                }
+                            }
+                            
+                            // Get best (closest & most edible/dangerous) creature (memories weighted based on oldness)
+                            let cp = this.centerPos, rel = this.relations;
+                            let best;
+                            if(visibles.length) {
+                                best = visibles.map(function(a) {
+                                    let distA = new Polygon([cp, a.centerPos]).lines[0].length;
+                                    let valA = (rel[a.id] || 0) / distA;
+                                    return {obj: a, uuid: a.uuid, v: valA, pos: a.centerPos, mem: false};
+                                }).sort((x, y) => (x.v > y.v ? 1 : y.v > x.v ? -1 : 0))[0];
+                            }
+                            let found = (best ? true : false);
+                            // Best will be in the format [uuid, value]
+                            // Now see if any memories are better than the best visible one
+                            for(let i of Object.values(this.memories)) {
+                                let distI = new Polygon([cp, i.pos]).lines[0].length;
+                                let valI = (rel[i.obj.id] || 0) / distI;
+                                valI *= Math.max(0, 1 - 0.0001 * (elapsedTime - i.time));
+                                if(!best || valI > best.v) best = {obj: i.obj, uuid: i.uuid, v: valI, pos: i.pos, mem: true};
+                            }
+                            
+                            // If no visible edible/dangerous creatures, just get a better vantage point?
+                            // LATER! this ^^
                             // ---- Step 2: Pathing
-                            // this is gonna be complicated
+                            let path;
+                            let HOWBIG = 20; // Can speed up pathfinding
+                            let MAXTIME = 10; // Lizors can pathfind for this # of ms MAX, then they give up, might lower this later
+                            if(best && (!best.obj || rel[best.obj.id] > 0)) {
+                                let t1 = Date.now();
+                                path = this.pathfind(best.pos, HOWBIG, 10, MAXTIME, true);
+                                ctx.strokeStyle = (this.completePath ? "violet" : "pink");
+                                ctx.lineWidth = 3;
+                                ctx.beginPath();
+                                ctx.moveTo(...this.centerPos);
+                                for(let i of path) {
+                                    ctx.lineTo(i.x * HOWBIG, i.y * HOWBIG);
+                                }
+                                ctx.stroke();
+                            }
                             // ---- Step 3: Movement
-                            this.xvel -= 0.3;
-                            // uggghhh
-                            // ---- Step 4: Physics
+                            if(path) {
+                                // Determine which direction to go, based on the 1st point whose X differs
+                                let dir = 0, tries = 0;
+                                while(tries < 20) {
+                                    if(!path[tries]) break;
+                                    dir = path[tries].x - path[0].x;
+                                    if(dir) break; else tries++;
+                                }
+                                if(this.in("stand")) {
+                                    if(dir > 0 && this.facing == 1) {
+                                        this.xvel += (this.completePath ? 0.15 : 0.03);
+                                        this.state = "stand.walk";
+                                    } else if(dir > 0 && this.facing == -1) {
+                                        // Turn.
+                                    } else if(dir < 0 && this.facing == -1) {
+                                        this.xvel -= (this.completePath ? 0.15 : 0.03);
+                                        this.state = "stand.walk";
+                                    } else if(dir < 0 && this.facing == 1) {
+                                        // Turn.
+                                    } else {
+                                        this.state = "stand.idle";
+                                        this.lgp = [140, 180, 240, 280];
+                                    }
+                                }
+                            }
+                            
+                            // Mouth open-ness
+                            let speed = 1;
+                            let oa = this.mouthOpen;
+                            let finished = this.mouthOpen == this.mouthGoal;
+                            let was = this.contact();
+                            if(this.mouthOpen < this.mouthGoal) {
+                                this.mouthOpen = Math.min(this.mouthGoal, this.mouthOpen + speed);
+                            } else {
+                                this.mouthOpen = Math.max(this.mouthGoal, this.mouthOpen - speed);
+                            }
+                            for(let i of ["headBU", "headTU", "headBL", "headTL", "eye"]) {
+                                this.body[i].angle = this.mouthOpen * (i.includes("L") ? -0.5 : 0.5);
+                                this.body[i].cx = this.body.headI.xpos;
+                                this.body[i].cy = this.body.headI.ypos;
+                            }
+                            
+                            // Angle change -> contact
+                            if(this.contact() && !finished) {
+                                this.mouthOpen = oa;
+                                //this.xvel = this.facing * -4;
+                                //this.xpos += this.xvel;
+                            }
+                            
+                            // Animation
+                            if(this.state == "stand.walk") {
+                                for(let i=0; i<=3; i++) this.lgp[i] -= this.xvel;
+                                if(this.facing == 1) {
+                                    if(this.lgp[0] <= 100) this.lgp[0] = 160;
+                                    if(this.lgp[2] <= 200) this.lgp[2] = 260;
+                                    if(this.lgp[1] <= 160) this.lgp[1] = 220;
+                                    if(this.lgp[3] <= 260) this.lgp[3] = 320;
+                                } else {
+                                    if(this.lgp[0] >= 160) this.lgp[0] = 100;
+                                    if(this.lgp[2] >= 260) this.lgp[2] = 200;
+                                    if(this.lgp[1] >= 220) this.lgp[1] = 160;
+                                    if(this.lgp[3] >= 320) this.lgp[3] = 260;
+                                }
+                            }
+                            if(!this.contact()) {
+                                this.body.legFLE.xpos += 0.1 * (this.lgp[0] - this.body.legFLE.xpos);
+                                if(this.contact()) this.body.legFLE.xpos -= 0.1 * (this.lgp[0] - this.body.legFLE.xpos);
+                            }
+                            if(!this.contact()) {
+                                this.body.legFRE.xpos += 0.1 * (this.lgp[1] - this.body.legFRE.xpos);
+                                if(this.contact()) this.body.legFRE.xpos -= 0.1 * (this.lgp[1] - this.body.legFRE.xpos);
+                            }
+                            if(!this.contact()) {
+                                this.body.legBLE.xpos += 0.1 * (this.lgp[2] - this.body.legBLE.xpos);
+                                if(this.contact()) this.body.legBLE.xpos -= 0.1 * (this.lgp[2] - this.body.legBLE.xpos);
+                            }
+                            if(!this.contact()) {
+                                this.body.legBRE.xpos += 0.1 * (this.lgp[3] - this.body.legBRE.xpos);
+                                if(this.contact()) this.body.legBRE.xpos -= 0.1 * (this.lgp[3] - this.body.legBRE.xpos);
+                            }
+                            // just do some basic stuff for now.
                             this.xpos += this.xvel;
+                            let xContact = false;
                             if(this.contact()) {
                                 let checks = 0;
                                 let xc = -0.1, yc = -0.4;
@@ -354,52 +618,61 @@
                                     this.xpos -= this.xvel;
                                     this.ypos -= yc * checks * Math.abs(this.xvel);
                                     this.xpos -= xc * checks * this.xvel;
-                                    if(this.in("stand")) {
-                                        // I don't need this, right?
-                                        /*if(this.xvel > 0) {
-                                            this.lgp = [25, 35];
-                                        } else {
-                                            this.lgp = [5, 15];
-                                        }*/
-                                    }
+                                    this.lgp = [140, 180, 240, 280];
                                     this.xvel *= 0.8;
+                                    xContact = true;
                                 }
                             }
                             // Horizontal friction
                             if(this.in("fall")) this.xvel *= 0.98;
                             else this.xvel *= 0.95;
+                            
                             this.ypos += this.yvel + 3;
+                            // Vertical stuff
+                            let yContact = 0;
                             if(this.contact() && this.in("fall")) {
-                                this.ypos -= this.yvel;
-                                if(this.yvel > 20) {
-                                    // Can lizors even get stunned by falling? Whatev
-                                } else {
-                                    // Just move around a little to make sure nothing weird is happening
-                                    let c1 = this.contact();
-                                    this.xvel += this.facing * 3;
-                                    let c = this.contact();
-                                    this.xvel -= this.facing * 3;
-                                    if(!c1 && !c) {
-                                        this.state = "stand.idle";
-                                    }
-                                    this.yvel = 0;
+                                yContact = this.yvel;
+                                this.ypos -= this.yvel * 2;
+                                // This might not be needed
+                                let c1 = this.contact();
+                                this.xvel += this.facing * 3;
+                                let c = this.contact();
+                                this.xvel -= this.facing * 3;
+                                if(!c1 && !c) {
+                                    this.state = "stand.idle";
                                 }
+                                let fix = 0;
+                                while(this.contact() && fix < 20) {
+                                    // Um, what?
+                                    fix++;
+                                    this.ypos -= 10;
+                                }
+                                if(this.contact()) {
+                                    // WHAT?!?!
+                                    alert("This isn't good...");
+                                }
+                                this.yvel = 0;
                             } else if(this.in("fall")) {
                                 this.yvel += 0.2; // Gravity
                             }
                             this.ypos += 3;
-                            if(!this.contact() && !this.in("fall")) {
+                            if(!this.contact() && !this.in("fall") && this.state != "crouch.climb") {
                                 this.state = "fall.idle";
+                                //alert("bonk!");
                             }
                             this.ypos -= 6;
                         }
                     );
-                    this.primary = col;
-                    this.secondary = col2;
+                    this.primary = col; this.secondary = col2; // Coloring
                     this.facing = -1;
-                    
-                    // Positive = wants to follow, negative = wants to avoid
-                    this.relations = {"sc": 10};
+                    this.memories = {}; // Where this lizor saw something and might wanna investigate
+                    this.relations = {"sc": 100}; // Positive = wants to follow, negative = wants to avoid
+                    this.lgp = [140, 180, 240, 280];
+                    this.mouthOpen = 0; // How open this lizor's mouth is
+                    this.mouthGoal = 120; // How open it wants to be
+                }
+                get centerPos() {
+                    return this.bodyCoords("eye");
                 }
             }
             
@@ -407,13 +680,11 @@
                 constructor(room, xpoz, ypoz) {
                     super("pinkliz", "#f6b", "#c26", room, xpoz, ypoz);
                     // After super call, change stuff as needed
-                    //this.relations.sc = 5;
                 }
             }
             
             class Player extends AbstractEntity {
                 constructor(room, xpoz, ypoz) {
-                    // Construct!
                     super(
                         // State determines key handling, hitboxes?, and rendering
                         // Second part of state is more precise
@@ -421,6 +692,7 @@
                         // These are the OFFSETS not the ABSOLUTE positions
                         {
                             bodyTL: new Position(5, 0), bodyTR: new Position(35, 0),
+                            bodyML: new Position(5, 35), bodyMR: new Position(35, 35),
                             legLS: new Position(5, 70), legLE: new Position(5, 90),
                             legRS: new Position(35, 70), legRE: new Position(35, 90),
                             armLS: new Position(10, 30), armLE: new Position(10, 30),
@@ -432,17 +704,21 @@
                         },
                         function(w = "full") {
                             // This should do for now
-                            if(w == "full" || !w) { return new Polygon([
+                            if(w == "top") { return new Polygon([
                                 this.bodyCoords("bodyTL"),
+                                this.bodyCoords("bodyML"),
+                                this.bodyCoords("legLS"),
+                                this.bodyCoords("legRS"),
+                                this.bodyCoords("bodyMR"),
+                                this.bodyCoords("bodyTR")
+                            ]); } else { return new Polygon([
+                                this.bodyCoords("bodyTL"),
+                                this.bodyCoords("bodyML"),
                                 this.bodyCoords("legLS"),
                                 this.bodyCoords("legLE"),
                                 this.bodyCoords("legRE"),
                                 this.bodyCoords("legRS"),
-                                this.bodyCoords("bodyTR")
-                            ]); } else if(w == "top") { return new Polygon([
-                                this.bodyCoords("bodyTL"),
-                                this.bodyCoords("legLS"),
-                                this.bodyCoords("legRS"),
+                                this.bodyCoords("bodyMR"),
                                 this.bodyCoords("bodyTR")
                             ]); }
                         },
@@ -450,7 +726,7 @@
                             let showTail = true, showFace = true, showArms = (this.in("climb") || this.in("balance") || this.in("crouch"));
                             
                             // middle part
-                            drawBody(this, ["bodyTL", "bodyTR", "legRS", "legLS"], 10);
+                            drawBody(this, ["bodyTL", "bodyTR", "bodyMR", "legRS", "legLS", "bodyML"], 10);
                             let lle = this.bodyCoords("legLE"), lre = this.bodyCoords("legRE");
                             if(this.in("roll")) {
                                 lle[0] = this.bodyCoords("legLS")[0];
@@ -486,15 +762,16 @@
                             }
                             if(showFace) {
                                 if(this.dead) {
-                                    // LATER!
+                                    // LATER! x_x
                                 } else if(this.stunTime) {
                                     ctx.lineWidth = 3;
-                                    // LATER! This could be improved
+                                    // LATER! >_<
                                     line(this.bodyCoords("eyeL", 0.5 * this.xvel + 2, 3), this.bodyCoords("eyeL", 0.5 * this.xvel), "black");
                                     line(this.bodyCoords("eyeL", 0.5 * this.xvel - 2, 3), this.bodyCoords("eyeL", 0.5 * this.xvel), "black");
                                     line(this.bodyCoords("eyeR", 0.5 * this.xvel + 2, 3), this.bodyCoords("eyeR", 0.5 * this.xvel), "black");
                                     line(this.bodyCoords("eyeR", 0.5 * this.xvel - 2, 3), this.bodyCoords("eyeR", 0.5 * this.xvel), "black");
                                 } else {
+                                    // °.°
                                     ctx.lineWidth = 10;
                                     circle(this.bodyCoords("eyeL", 0.5 * this.xvel), 5);
                                     circle(this.bodyCoords("eyeR", 0.5 * this.xvel), 5);
@@ -504,7 +781,7 @@
                         },
                         function() {
                             // Controls
-                            const turnaround = 0.3;
+                            let turnaround = 0.3;
                             if(this.in("stand")) {
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     if((this.facing == 1 && this.state == "stand.walk") || this.state == "stand.idle") {
@@ -512,14 +789,16 @@
                                         this.xvel += 0.2;
                                         this.state = "stand.walk";
                                     } else {
-                                        if(this.builtSpeed >= 60 || (this.xvel < 3 * turnaround && this.state == "stand.turn" && this.facing == 1)) {
-                                            // LATER! Particles
+                                        if(this.builtSpeed >= 25 || (this.xvel < 3 * turnaround && this.state == "stand.turn" && this.facing == 1)) {
+                                            // LATER! Add particles and maybe change the turny requirement
                                             this.state = "stand.turn";
                                             this.xvel += turnaround;
                                             if(this.xvel >= 3 * turnaround) {
                                                 this.state == "stand.walk";
                                                 this.xvel = this.facing * 5;
                                             }
+                                            
+                                            // FIRST! BackFlip
                                         } else {
                                             // Just turn around normally
                                             this.xvel += 0.5;
@@ -535,14 +814,16 @@
                                         this.xvel -= 0.2;
                                         this.state = "stand.walk";
                                     } else {
-                                        if(this.builtSpeed >= 60 || (this.xvel > -3 * turnaround && this.state == "stand.turn" && this.facing == -1)) {
-                                            // LATER! Particles
+                                        if(this.builtSpeed >= 25 || (this.xvel > -3 * turnaround && this.state == "stand.turn" && this.facing == -1)) {
+                                            // LATER! Add particles and maybe change the turny requirement
                                             this.state = "stand.turn";
                                             this.xvel -= turnaround;
                                             if(this.xvel <= -3 * turnaround) {
                                                 this.state == "stand.walk";
                                                 this.xvel = this.facing * 5;
                                             }
+                                            
+                                            // FIRST! BackFlip
                                         } else {
                                             // Just turn around normally
                                             this.xvel -= 0.5;
@@ -570,11 +851,10 @@
                                     // Crouch
                                     this.state = "crouch.idle";
                                     this.agpx = [50 * this.facing, 150 * this.facing];
-                                    // That was shrimple enough
                                 }
                                 
                                 // Angling
-                                this.goalAngle = 0;
+                                this.goalAngle = 0; this.topGoalAngle = 0;
                             } else if(this.in("fall")) {
                                 if(pressedKeys["90"] && newKeys.includes(90) && this.state == "fall.slide") {
                                     // Wall jump
@@ -593,16 +873,18 @@
                                 } else if(!this.contact()) {
                                     this.state = "fall.idle";
                                 }
-                                if(Math.abs(this.goalAngle) == 90 && pressedKeys["38"]) {
+                                
+                                /*if(Math.abs(this.goalAngle) == 90 && pressedKeys["38"]) {
                                     this.goalAngle = 0;
                                 }
+                                if(pressedKeys["40"] && !pressedKeys["38"]) {
+                                    this.goalAngle = 90 * this.facing;
+                                }*/
                                 
                                 this.lgp = ((pressedKeys["39"] || pressedKeys["37"]) ? [5 - this.facing * 10, 30 - this.facing * 10] : [5, 35]);
                             } else if(this.in("crouch")) {
-                                let c1 = this.contact();
                                 this.ypos -= 50;
-                                let c2 = this.contact();
-                                let canStandUp = !(c1 || c2);
+                                let canStandUp = !this.contact();
                                 this.ypos += 50;
                                 // Crawling
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
@@ -611,7 +893,7 @@
                                             this.state = "crouch.turn";
                                             this.agpx = [10, 30];
                                             this.facing = 1;
-                                        } else alert("turn right BLOCKED!");
+                                        } //else alert("turn right BLOCKED!");
                                         // LATER! If you can't stand up, maybe try turning
                                     } else if(this.state == "crouch.idle" || (this.facing == 1 && this.state == "crouch.crawl")) {
                                         // Move forward
@@ -626,7 +908,7 @@
                                             this.state = "crouch.turn";
                                             this.agpx = [10, 30];
                                             this.facing = -1;
-                                        } else alert("turn left BLOCKED!");
+                                        } //else alert("turn left BLOCKED!");
                                         // LATER! If you can't stand up, maybe try turning
                                     } else if(this.state == "crouch.idle" || this.state == "crouch.crawl") {
                                         // Move forward
@@ -641,35 +923,56 @@
                                     this.xvel *= 0.8;
                                     this.builtSpeed = 0;
                                 }
-                                if(pressedKeys["38"]) {
-                                    // Get up
-                                    if(canStandUp) {
+                                
+                                if(this.state != "crouch.climb") { // Standing up & charge pounces don't happen in climbstate
+                                    if(pressedKeys["38"] && canStandUp) {
                                         this.goalAngle = 0;
                                         this.state = "stand.idle";
                                     }
-                                }
-                                if(pressedKeys["90"]) {
-                                    // Charge???
-                                    this.pounceCharge++;
-                                } else if(this.pounceCharge > 60) {
-                                    this.pounceCharge = 0;
-                                    // Leap!
-                                    this.state = "fall.leap";
-                                    this.xvel = this.facing * 15;
-                                    this.yvel = -8;
-                                    this.builtSpeed = 0;
-                                } else if(this.pounceCharge) {
-                                    this.pounceCharge = 0;
-                                    // A little jump
-                                    this.yvel = -4;
-                                    this.state = "fall.idle";
-                                    this.builtSpeed = 0;
+                                    if(pressedKeys["90"]) {
+                                        // Charge???
+                                        this.pounceCharge++;
+                                    } else if(this.pounceCharge > 60) {
+                                        this.pounceCharge = 0;
+                                        // Leap!
+                                        this.state = "fall.idle";
+                                        // HUGE speed, but it'll decay fast
+                                        this.xvel = this.facing * 15;
+                                        this.yvel = -8;
+                                        this.builtSpeed = 0;
+                                    } else if(this.pounceCharge) {
+                                        this.pounceCharge = 0;
+                                        // A little hop
+                                        this.yvel = -4;
+                                        this.state = "fall.idle";
+                                        this.builtSpeed = 0;
+                                    }
+                                    this.topGoalAngle = this.facing * (this.pounceCharge >= 60 ? 10 : 0);
                                 }
                                 
-                                // Angling
-                                this.goalAngle = this.facing * (this.pounceCharge >= 60 ? 80 : 90);
-                                if(this.pounceCharge >= 60) {
-                                    // LATER! Do something with agpx here
+                                // Stop being in this climb up position?
+                                if(this.state == "crouch.climb" && Math.abs(this.topAngle) < 50) {
+                                    this.state = "crouch.idle";
+                                    // Often, this will cause you to fall back off the ledge you climbed up, so correct this
+                                    this.xvel = this.facing * 8;
+                                }
+                                
+                                // Begin the standing-up process
+                                if(Math.abs(this.topGoalAngle) > 10) {
+                                    //alert("STAND UP");
+                                    this.topGoalAngle = 0;
+                                    this.goalAngle = this.facing * 90;
+                                }
+                                
+                                if(this.state == "crouch.climb") {
+                                    // Tick down
+                                    // Prevent accelerating backward
+                                    this.xvel = this.facing * 3;
+                                    if(this.contact()) this.ypos -= 5;
+                                    //this.goalAngle = 0;
+                                } else if(Math.abs(this.topAngle) < 10) {
+                                    // Angling
+                                    this.goalAngle = this.facing * (this.pounceCharge >= 60 ? 80 : 90);
                                 }
                                 if(this.state == "crouch.turn" && this.facing * 90 == this.angle) {
                                     this.state = "crouch.idle";
@@ -704,7 +1007,7 @@
                                     this.lgp = [35, 45];
                                 }
                                 if(pressedKeys["90"]) {
-                                    if(pressedKeys["38"]) {
+                                    if(pressedKeys["38"] && !pressedKeys[(38 + this.climbSide).toString()]) {
                                         if(!this.poleBoost) {
                                             this.poleBoost = 40;
                                             this.yvel = -10;
@@ -712,6 +1015,7 @@
                                     } else {
                                         // Polejump
                                         this.stopGrab = 20;
+                                        alert("pjump");
                                         this.state = "fall.idle";
                                         this.xpg = 0;
                                         this.ypg = 0;
@@ -760,6 +1064,7 @@
                                 
                                 // Fall off the pole?
                                 if(Math.abs(this.angle) > 36 || pressedKeys["90"]) {
+                                    alert("falloff");
                                     this.state = "fall.idle";
                                     this.stopGrab = 30;
                                     this.xpg = 0;
@@ -833,7 +1138,8 @@
                             
                             // Horizontal movement
                             this.xpos += this.xvel;
-                            if(this.contact() && !this.noFall) {
+                            if(this.noFall) this.ypos -= 50;
+                            if(this.contact() && this.state != "crouch.climb") {
                                 //alert("Xvel contact.");
                                 // Try to just walk upwards
                                 let checks = 0;
@@ -857,19 +1163,46 @@
                                     }
                                     // Wall sliding - reduce yvel & put into WS state
                                     if(this.in("fall") && ((pressedKeys["39"] && this.xvel > 0) || (pressedKeys["37"] && this.xvel < 0))) {
-                                        this.state = "fall.slide";
-                                        this.yvel *= 0.5;
-                                        this.colliding = 5; // Stop BTGP for a few frames
-                                        let b = this.btgp;
-                                        this.btgp = 0;
-                                        if(this.contact()) {
-                                            this.xpos -= b;
+                                        let toTop = 0;
+                                        this.xpos += this.xvel; // Go back into the wall
+                                        while(toTop < 150 && this.contact()) {
+                                            this.ypos -= 10; toTop += 10;
                                         }
-                                        
+                                        if(toTop < 100 && !this.contact(false)) {
+                                            // Climbing up
+                                            this.state = "crouch.climb";
+                                            this.climbTime = 20;
+                                            this.topGoalAngle = this.facing * 90;
+                                            this.topAngle = this.topGoalAngle;
+                                            this.xpos -= 1 * this.xvel;
+                                            this.ypos -= 20;
+                                            this.yvel = 0;
+                                            this.xvel = 0;
+                                        } else {
+                                            this.ypos += toTop; this.xpos -= this.xvel; // Undo that
+                                            this.state = "fall.slide";
+                                            this.yvel *= 0.75;
+                                            this.colliding = 5; // Stop BTGP for a few frames
+                                            let b = this.btgp;
+                                            this.btgp = 0;
+                                            if(this.contact()) {
+                                                this.xpos -= b;
+                                            }
+                                        }
+                                    }
+                                    if(this.in("roll")) {
+                                        if(this.contact()) {
+                                            this.state = "stand.idle";
+                                            this.xpos -= 10 * this.xvel;
+                                            this.ypos -= 20;
+                                            this.angle = 0;
+                                            this.goalAngle = 0;
+                                        }
                                     }
                                     this.xvel *= 0.8;
                                 }
                             } else { this.colliding = Math.max(0, this.colliding - 1); }
+                            if(this.noFall) this.ypos += 50;
                             if(this.stopGrab) this.stopGrab--;
                             // Horizontal friction
                             if(this.in("roll")) this.xvel *= 1.00; // conservation of momentum
@@ -920,7 +1253,7 @@
                                     this.xvel -= this.facing * 3;
                                     //alert("Ouch! c1="+c1+" c="+c);
                                     if(!c1 && !c) {
-                                        if(Math.abs(this.angle) > 70) {
+                                        if(Math.abs(this.angle) > 70 || this.state == "crouch.climb") {
                                             this.state = "crouch.idle";
                                             this.agpx = [50 * this.facing, 150 * this.facing];
                                         } else this.state = "stand.idle";
@@ -950,7 +1283,8 @@
                             this.ypos += 3;
                             // While noFall is active, make this harder to activate, but not impossible
                             if(this.noFall) this.ypos += 5;
-                            if(!this.contact() && !this.in("fall") && !this.in("climb") && !this.in("balance")) {
+                            if(!this.contact() && !this.in("fall") && !this.in("climb") && !this.in("balance") && this.state != "crouch.climb") {
+                                //alert("ouch... state="+this.state);
                                 this.state = "fall.idle";
                                 this.builtSpeed = 0;
                                 if(this.noFall) {
@@ -968,11 +1302,14 @@
                                 this.xpg = 0;
                             }
                             
+                            // FIRST! What is going on to keep SC in the cro.cli state?
 
                             // Changing angle
                             if(this.angle > 180) {this.angle -= 360; this.goalAngle -= 360;}
                             if(this.angle < -180) {this.angle += 360; this.goalAngle += 360;}
-                            let speed = (this.in("stun") ? 10 : 5);
+                            
+                            let speed = (this.in("stun") ? 10 : 5); // <-- why does this stun part exist?
+                            if(this.climbTime) {this.climbTime--; speed += 5;} // Go faster just after climbing
                             let oa = this.angle;
                             let finished = this.angle == this.goalAngle;
                             let was = this.contact();
@@ -981,20 +1318,37 @@
                             } else {
                                 this.angle = Math.max(this.goalAngle, this.angle - speed);
                             }
-                            if(this.contact() && !finished && !was) {
+                            if(this.contact() && !finished) {
+                                //alert("Hey!");
                                 if(this.in("stand") && Math.abs(this.angle) > 50) {
                                     // You probably tried to stand up when you really shouldn't have, get back down there!
                                     this.goalAngle = 90 * (this.angle > 0 ? 1 : -1);
                                     this.angle = this.goalAngle;
                                     this.state = "crouch.idle";
-                                } else {
-                                    this.angle = oa + (oa > 0 ? -1 : 1);
+                                } else if(!this.in("roll")) {
+                                    this.angle = oa;
                                     this.xvel = this.facing * -4;
                                     this.xpos += this.xvel;
                                 }
                             }
                             
-                            if(this.in("roll") && this.facing == 1 && this.angle == 90 && this.goalAngle >= 360) {
+                            // Top angle is much the same
+                            let tspeed = 20;
+                            let toa = this.topAngle;
+                            let tfinished = this.topAngle == this.topGoalAngle;
+                            let twas = this.contact();
+                            if(this.topAngle < this.topGoalAngle) {
+                                this.topAngle = Math.min(this.topGoalAngle, this.topAngle + tspeed);
+                            } else {
+                                this.topAngle = Math.max(this.topGoalAngle, this.topAngle - tspeed);
+                            }
+                            if(this.contact() && !tfinished) {
+                                this.topAngle = toa;
+                                this.xvel = this.facing * -4;
+                                this.xpos += this.xvel;
+                            }
+                            
+                            if(this.in("roll") && this.facing == 1 && this.angle == 90 && this.goalAngle >= 360 && !this.noFall) {
                                 //alert("rolly");
                                 this.xpos += 70;
                                 this.ypos += 40;
@@ -1019,12 +1373,22 @@
                             
                             let cx = (this.angle > 0 ? 35 : 5);
                             let cy = 90;
-                            if(this.noFall) {
-                                cx = 20; cy = 20;
+                            let cx2 = (this.topAngle > 0 ? 35 : 5);
+                            let cy2 = 35;
+                            
+                            /*circle([this.body.bodyML.REAL_xpos + this.xpos, this.body.bodyML.REAL_ypos + this.ypos], 5, "pink");
+                            circle([this.body.bodyMR.REAL_xpos + this.xpos, this.body.bodyMR.REAL_ypos + this.ypos], 5, "green");
+                            circle([this.body.bodyTL.REAL_xpos + this.xpos, this.body.bodyTL.REAL_ypos + this.ypos], 5, "blue");
+                            circle([this.body.bodyTR.REAL_xpos + this.xpos, this.body.bodyTR.REAL_ypos + this.ypos], 5, "yellow");*/
+                            
+                            // Sometimes the mid body segments get screwed up
+                            if(Math.abs(this.topAngle) < 1 && !this.topGoalAngle) {
+                                this.body.bodyML.ypos = 35;
+                                this.body.bodyMR.ypos = 35;
                             }
-                            for(let i of Object.values(this.body)) {
-                                i.cx = cx; i.cy = cy;
-                            }
+                            
+                            if(this.noFall) {cx = 20; cy = 20;}
+                            for(let i of Object.values(this.body)) {i.cx = cx; i.cy = cy; i.secondCx = cx2; i.secondCy = cy2;}
                             
                             // Moving forward - make the legs move back, then check if they need to be moved forward
                             if(this.state == "stand.walk") {
@@ -1083,8 +1447,24 @@
                                 }
                             }
                             
+                            // Change mid body when the second angle is set, so they don't look too weird
+                            if(this.topAngle > 0) {
+                                let adj = this.topAngle;
+                                if(adj < 45) adj += 2 * (45 - adj);
+                                let squished = 90 - 0.5 * (90 - adj);
+                                let cosine = Math.cos(squished * Math.PI / 180);
+                                this.body.bodyML.ypos = cosine * 0.8;
+                            } else if(this.topAngle < 0) {
+                                let adj = -1 * this.topAngle;
+                                if(adj < 45) adj += 2 * (45 - adj);
+                                let squished = 90 - 0.5 * (90 - adj);
+                                let cosine = Math.cos(squished * Math.PI / 180);
+                                this.body.bodyMR.ypos = cosine * 0.8;
+                            }
+                            
+                            
                             // It would look a little weird if I just hid the arms, so I'll do this instead
-                            if(!this.in("crouch") && !this.in("climb") && !this.in("balance")) {
+                            if((!this.in("crouch") || this.state == "crouch.climb") && !this.in("climb") && !this.in("balance")) {
                                 this.agpx = [20 + this.btgp * 1, 20 + this.btgp * 1];
                                 this.agpy = [30, 30];
                             }
@@ -1106,9 +1486,13 @@
                             this.body.armRE.ypos += 0.1 * (this.agpy[1] - this.body.armRE.ypos);
                             
                             // BTGP
-                            if((this.in("stand") || this.in("fall") || this.in("balance")) && Math.abs(this.angle) < 1) {
+                            //this.topAngle = 80;
+                            if((this.in("stand") || this.in("fall") || this.in("balance")) && Math.abs(this.angle) < 1 && Math.abs(this.topAngle) < 1) {
+                                //alert("Here we go...");
                                 this.body.bodyTL.xpos += 0.1 * (this.btgp + 5 - this.body.bodyTL.xpos);
                                 this.body.bodyTR.xpos += 0.1 * (this.btgp + 35 - this.body.bodyTR.xpos);
+                                this.body.bodyML.xpos += 0.1 * (0.5 * this.btgp + 5 - this.body.bodyML.xpos);
+                                this.body.bodyMR.xpos += 0.1 * (0.5 * this.btgp + 35 - this.body.bodyMR.xpos);
                                 this.body.earLS.xpos += 0.1 * (this.btgp + 5 - this.body.earLS.xpos);
                                 this.body.earLE.xpos += 0.1 * (this.btgp + 5 - this.body.earLE.xpos);
                                 this.body.earRS.xpos += 0.1 * (this.btgp + 35 - this.body.earRS.xpos);
@@ -1120,6 +1504,8 @@
                                 // Clear out BTGP
                                 this.body.bodyTL.xpos += this.btgp + 5 - this.body.bodyTL.xpos;
                                 this.body.bodyTR.xpos += this.btgp + 35 - this.body.bodyTR.xpos;
+                                this.body.bodyML.xpos += 0.5 * this.btgp + 5 - this.body.bodyML.xpos;
+                                this.body.bodyMR.xpos += 0.5 * this.btgp + 35 - this.body.bodyMR.xpos;
                                 this.body.earLS.xpos += this.btgp + 5 - this.body.earLS.xpos;
                                 this.body.earLE.xpos += this.btgp + 5 - this.body.earLE.xpos;
                                 this.body.earRS.xpos += this.btgp + 35 - this.body.earRS.xpos;
@@ -1137,9 +1523,14 @@
                             this.df2 -= 0.05 * (this.df2 - df);
                             
                             // Angle stuff
-                            // Rotate most things about SC
-                            for(let i of ["bodyTL", "bodyTR", "earLS", "earLE", "armLS", "armRS", "earRS", "earRE", "eyeL", "eyeR", "nouth", "legLS", "legRS"]) {
+                            //this.angle = 0;
+                            for(let i of ["bodyTL", "bodyTR", "bodyML", "bodyMR", "earLS", "earLE", "armLS", "armRS", "earRS", "earRE", "eyeL", "eyeR", "nouth", "legLS", "legRS"]) {
                                 this.body[i].angle = this.angle;
+                            }
+                            // Add topAngle to the upper parts
+                            // Ohh this is tricky... the rotation direction needs to be changed
+                            for(let i of ["bodyTL", "bodyTR", "earLS", "earLE", "earRS", "earRE", "eyeL", "eyeR", "nouth"]) {
+                                this.body[i].secondAngle = this.topAngle;
                             }
 
                             // Tail
@@ -1186,20 +1577,21 @@
                     this.btgp = 0; // Body Top Goal Pos
                     this.facing = 1; // 1 or -1
                     this.builtSpeed = 0; // How long you've been going in the current direction
-                    this.tail = [];
+                    this.tail = []; // Array of tail segments
                     this.angle = 0, this.goalAngle = 0; // Where you want to turn
-                    this.stunTime = 0;
+                    this.topAngle = 0, this.topGoalAngle = 0; // Add'l angle added just to the top part
+                    this.stunTime = 0; // How long until you're unstunned
                     this.colliding = 0; // Whether to stop BTGP due to a collision
                     this.myPole = null; // Pole you're currently climbing on
-                    this.climbSide = 0; // Which side you're climbing on, only relevant while in `climb.*`
+                    this.climbSide = 0; // Which side you're climbing on, only relevant while in climb
                     this.df2 = 0; // This is related to the tail somehow. Don't even try asking me what it stands for
-                    this.stopGrab = 0;
+                    this.stopGrab = 0; // Block regrabbing a pole you just jumped off
                     this.poleBoost = 0; // Boosting up poles
-                    this.pounceCharge = 0;
-                    this.noFall = false;
+                    this.pounceCharge = 0; // Time spent holding Z in crouch
+                    this.noFall = false; // Whether to restrict going into fall state; used when rolling
+                    this.climbTime = 0; // FIRST! Stop fast-stand when holding up and make up required to climb and reduce climb limit and fix not climbing sometimes and other climbing stuff
                 }
                 stun(time) {
-                    // Set state & timer
                     this.state = "stun.idle";
                     this.stunTime = time;
                     // LATER! Drop what you're holding
@@ -1210,36 +1602,39 @@
                     circle(this.bodyCoords("armLE"), 5, "white");
                     circle(this.bodyCoords("armRE"), 5, "white");
                 }
+                get centerPos() {
+                    return [this.bodyCoords("bodyTL")[0] + 0.5 * (this.bodyCoords("bodyTR")[0] - this.bodyCoords("bodyTL")[0]), this.bodyCoords("bodyTL")[1]];
+                }
             }
             
-            let SC, rooms = [];
-            
+            let SC, rooms = [], lizor;
+            let slowdown = false;
             try {
                 let startRoom = new Room(
                     // FG MG BG
                     [new Rectangle(1060, 50, 80, 250, "#633")],
                     [
-                        new Rectangle(10, 50, 80, 350, "#363"),
-                        new Rectangle(900, 50, 80, 250, "#363"),
-                        new Rectangle(90, 320, 420, 80, "#363"),
-                        new Rectangle(430, 470, 80, 120, "#383"),
-                        //new Polygon([[260, 320], [280, 250], [360, 320]], "#363"), // Wtf is this
-                        new Rectangle(430, 590, 900, 80, "#363"),
-                        new Rectangle(100, 470, 330, 120, "#393"),
-                        new Rectangle(900, 510, 80, 80, "353")
+                        new Rectangle(0, 20, 100, 380, "#363"),
+                        new Rectangle(900, 160, 80, 240, "#343"),
+                        new Rectangle(100, 320, 800, 80, "#393"),
+                        new Rectangle(440, 480, 80, 120, "#363"),
+                        new Rectangle(440, 600, 900, 80, "#363"),
+                        new Rectangle(100, 480, 340, 80, "#363"),
+                        //new Rectangle(900, 510, 80, 80, "#363")
                     ],
                     [new Rectangle(980, 50, 80, 250, "#336")],
                     // Poles: Start, end, other, dir
-                    [new Pole(200, 590, 750, "v")]
+                    [new Pole(600, 620, 750, "v")]
                 );
                 rooms.push(startRoom);
                 // Initialize player
                 SC = new Player(startRoom, 120, 80);
                 // Spawn a liz
-                let lizor = new PinkLizard(startRoom, 1100, 350);
+                lizor = new PinkLizard(startRoom, 600, 450);
             } catch(e) { alert("Error in init: " + e); }
             
             function frame(globalTimer) { try {
+                elapsedTime = globalTimer;
                 ctx.clearRect(0, 0, 1350, 630);
                 // LARGE! More rooms? More cameras? Scrolling!?
                 SC.room.render();
@@ -1248,10 +1643,16 @@
                 }
                 newKeys = [];
                 
-                document.getElementById("sayer").innerHTML = `<i>wetlands ${VERSION}</i> | f=${SC.facing} vel=(${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos=(${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle=${SC.angle.toFixed(0)} (${SC.goalAngle.toFixed(0)}) hb=${SC.contact()} btgp=${SC.btgp.toFixed(0)} mp=${SC.myPole} nf=${SC.noFall} df2=${SC.df2.toFixed(1)} bspd=${SC.builtSpeed.toFixed(0)} state=${SC.state} in=${Object.keys(pressedKeys).filter(x=>pressedKeys[x])}`;
-                SC.btgp = 0; // Delete this later
+                // Test to make sure my contact code works
+                //let gc = SC.room.grid[Math.floor(mousey / 10)][Math.floor(mousex / 10)];
                 
-                let DEL = 0;
+                let tex = `<i>wetlands ${VERSION}</i> | lizor's stats -- state: ${lizor.state} contact: <span style="background:${lizor.contact() ? "red" : "blue"}">${lizor.contact() ? "yes" : "no"}</span> | your stats -- facing: ${SC.facing == 1 ? "right" : "left"} vel: (${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos: (${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle: <span style="background:${SC.angle == SC.goalAngle ? "blue" : "red"}">${SC.angle.toFixed(0)} (${SC.goalAngle.toFixed(0)})</span> + <span style="background:${SC.topAngle == SC.topGoalAngle ? "blue" : "red"}">${SC.topAngle.toFixed(0)} (${SC.topGoalAngle.toFixed(0)})</span> contact: <span style="background:${SC.contact() ? "red" : "blue"}">${SC.contact() ? "yes" : "no"}</span> tilt: <span style="background:${Math.abs(SC.btgp) > 1 ? "red" : "blue"}">${SC.btgp.toFixed(0)}</span> pole: <span style="background:${SC.myPole ? "red" : "blue"}">${SC.myPole ? "yes" : "no"}</span> nofall: <span style="background:${SC.noFall ? "red" : "blue"}">${SC.noFall ? "yes" : "no"}</span> fakevel: <span style="background:${Math.abs(SC.df2) > 0.1 ? "red" : "blue"}">${SC.df2.toFixed(1)}</span> ctime: <span style="background:${SC.climbTime ? "red" : "blue"}">${SC.climbTime}</span> state: ${SC.state} inputs: ${Object.keys(pressedKeys).filter(x=>pressedKeys[x])}`;
+                document.getElementById("sayer").innerHTML = tex;
+                document.getElementById("sayer").style.fontSize = Math.floor(Math.min(16, 7200 / tex.length)) + "px";
+                SC.btgp = 0; // Delete this later!
+                
+                if(SC.state == "crouch.climb") slowdown = true;
+                let DEL = slowdown ? 1 : 0;
                 if(DEL) setTimeout(function() {window.requestAnimationFrame(frame)}, DEL);
                 else window.requestAnimationFrame(frame);
             } catch(e) { alert("Error in frame(): " + e); } }
@@ -1260,6 +1661,10 @@
                 let k = e.keyCode;
                 //alert("Key pressed: " + k);
             });
+            document.onmousemove = function(e) {
+                mousex = e.clientX;
+                mousey = e.clientY;
+            }
             function loaded() {
                 ctx = document.getElementById("canv").getContext("2d");
                 window.requestAnimationFrame(frame);
