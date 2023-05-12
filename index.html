@@ -11,7 +11,7 @@
             }
         </style>
         <script>
-            let VERSION = "v0.0.4.1"; // It's gonna be awhile before this is relevant
+            let VERSION = "v0.0.4.2"; // It's gonna be awhile before this is relevant
             document.getElementById("titell").textContent = "wetlands " + VERSION;
             let ctx, elapsedTime = 0;
             let mousey = 0, mousex = 0;
@@ -868,9 +868,17 @@
                                     this.builtSpeed = 0;
                                 }
                                 if(pressedKeys["40"] && !pressedKeys["38"]) {
-                                    // Crouch
-                                    this.state = "crouch.idle";
-                                    this.agpx = [50 * this.facing, 150 * this.facing];
+                                    // Before crouching, make sure you can
+                                    let old = this.angle;
+                                    this.angle = this.facing * 10;
+                                    if(this.contact()) {
+                                        // Seems like that won't work...
+                                        this.angle = old;
+                                    } else {
+                                        this.angle = old;
+                                        this.state = "crouch.idle";
+                                        this.agpx = [50 * this.facing, 150 * this.facing];
+                                    }
                                 }
                                 
                                 // Angling
@@ -904,17 +912,17 @@
                                 this.lgp = ((pressedKeys["39"] || pressedKeys["37"]) ? [5 - this.facing * 10, 30 - this.facing * 10] : [5, 35]);
                             } else if(this.in("crouch")) {
                                 this.ypos -= 50;
-                                let canStandUp = !this.contact();
+                                let canStand = !this.contact();
+                                this.canStand = canStand;
                                 this.ypos += 50;
                                 // Crawling
                                 if(pressedKeys["39"] && !pressedKeys["37"]) {
                                     if((this.state == "crouch.idle" || this.state == "crouch.crawl") && this.facing == -1) {
-                                        if(canStandUp) {
+                                        if(canStand) {
                                             this.state = "crouch.turn";
                                             this.agpx = [10, 30];
                                             this.facing = 1;
                                         } //else alert("turn right BLOCKED!");
-                                        // LATER! If you can't stand up, maybe try turning
                                     } else if(this.state == "crouch.idle" || (this.facing == 1 && this.state == "crouch.crawl")) {
                                         // Move forward
                                         this.state = "crouch.crawl";
@@ -924,13 +932,12 @@
                                     }
                                 } else if(pressedKeys["37"]) {
                                     if((this.state == "crouch.idle" || this.state == "crouch.crawl") && this.facing == 1) {
-                                        if(canStandUp) {
+                                        if(canStand) {
                                             this.state = "crouch.turn";
                                             this.agpx = [10, 30];
                                             this.facing = -1;
                                         } //else alert("turn left BLOCKED!");
-                                        // LATER! If you can't stand up, maybe try turning
-                                    } else if(this.state == "crouch.idle" || this.state == "crouch.crawl") {
+                                    } else if(this.state == "crouch.idle" || (this.facing == 1 && this.state == "crouch.crawl")) {
                                         // Move forward
                                         this.state = "crouch.crawl";
                                         this.builtSpeed++;
@@ -945,11 +952,11 @@
                                 }
                                 
                                 if(this.state != "crouch.climb") { // Standing up & charge pounces don't happen in climbstate
-                                    if(pressedKeys["38"] && canStandUp) {
+                                    if(pressedKeys["38"] && canStand) {
                                         this.goalAngle = 0;
                                         this.state = "stand.idle";
                                     }
-                                    if(pressedKeys["90"]) {
+                                    if(pressedKeys["90"] && canStand) {
                                         // Charge???
                                         this.pounceCharge++;
                                     } else if(this.pounceCharge > 60) {
@@ -968,6 +975,20 @@
                                         this.builtSpeed = 0;
                                     }
                                     this.topGoalAngle = this.facing * (this.pounceCharge >= 60 ? 10 : 0);
+                                }
+                                
+                                if(pressedKeys["90"] && !canStand) {
+                                    // This will either boost you forward or turn around, depending on direction
+                                    if(pressedKeys[38 - this.facing]) {
+                                        // Turn around
+                                        this.facing *= -1;
+                                        this.angle = this.facing * 90;
+                                        this.goalAngle = this.facing * 90;
+                                        this.xvel = 0;
+                                    } else {
+                                        // Boost
+                                        this.xvel = this.facing * 8;
+                                    }
                                 }
                                 
                                 // Stop being in this climb up position?
@@ -1648,6 +1669,11 @@
                 }
             }
             
+            class DoItLater {
+                constructor() {
+                }
+            }
+            
             let SC, rooms = [], lizor;
             let slowdown = false;
             try {
@@ -1688,9 +1714,9 @@
                 // Test to make sure my contact code works
                 //let gc = SC.room.grid[Math.floor(mousey / 10)][Math.floor(mousex / 10)];
                 
-                let tex = `<i>wetlands ${VERSION}</i> | lizor's stats -- state: ${lizor.state} contact: <span style="background:${lizor.contact() ? "red" : "blue"}">${lizor.contact() ? "yes" : "no"}</span> | your stats -- facing: ${SC.facing == 1 ? "right" : "left"} vel: (${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos: (${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle: <span style="background:${SC.angle == SC.goalAngle ? "blue" : "red"}">${SC.angle.toFixed(0)} (${SC.goalAngle.toFixed(0)})</span> + <span style="background:${SC.topAngle == SC.topGoalAngle ? "blue" : "red"}">${SC.topAngle.toFixed(0)} (${SC.topGoalAngle.toFixed(0)})</span> contact: <span style="background:${SC.contact() ? "red" : "blue"}">${SC.contact() ? "yes" : "no"}</span> tilt: <span style="background:${Math.abs(SC.btgp) > 1 ? "red" : "blue"}">${SC.btgp.toFixed(0)}</span> pole: <span style="background:${SC.myPole ? "red" : "blue"}">${SC.myPole ? "yes" : "no"}</span> nofall: <span style="background:${SC.noFall ? "red" : "blue"}">${SC.noFall ? "yes" : "no"}</span> fakevel: <span style="background:${Math.abs(SC.df2) > 0.1 ? "red" : "blue"}">${SC.df2.toFixed(1)}</span> climbtime: <span style="background:${SC.climbTime ? "red" : "blue"}">${SC.climbTime}</span> backflip: <span style="background:${SC.backflipping ? "red" : "blue"}">${SC.backflipping ? "yes" : "no"}</span> [${SC.DEBUGGO}] state: ${SC.state} inputs: ${Object.keys(pressedKeys).filter(x=>pressedKeys[x])}`;
+                let tex = `<i>wetlands ${VERSION}</i> | lizor's stats -- state: ${lizor.state} contact: <span style="background:${lizor.contact() ? "red" : "blue"}">${lizor.contact() ? "yes" : "no"}</span> | your stats -- facing: ${SC.facing == 1 ? "right" : "left"} vel: (${SC.xvel.toFixed(1)},${SC.yvel.toFixed(1)}) pos: (${SC.xpos.toFixed(1)},${SC.ypos.toFixed(1)}) angle: <span style="background:${SC.angle == SC.goalAngle ? "blue" : "red"}">${SC.angle.toFixed(0)} (${SC.goalAngle.toFixed(0)})</span> + <span style="background:${SC.topAngle == SC.topGoalAngle ? "blue" : "red"}">${SC.topAngle.toFixed(0)} (${SC.topGoalAngle.toFixed(0)})</span> contact: <span style="background:${SC.contact() ? "red" : "blue"}">${SC.contact() ? "yes" : "no"}</span> tilt: <span style="background:${Math.abs(SC.btgp) > 1 ? "red" : "blue"}">${SC.btgp.toFixed(0)}</span> pole: <span style="background:${SC.myPole ? "red" : "blue"}">${SC.myPole ? "yes" : "no"}</span> nofall: <span style="background:${SC.noFall ? "red" : "blue"}">${SC.noFall ? "yes" : "no"}</span> fakevel: <span style="background:${Math.abs(SC.df2) > 0.1 ? "red" : "blue"}">${SC.df2.toFixed(1)}</span> climbtime: <span style="background:${SC.climbTime ? "red" : "blue"}">${SC.climbTime}</span> backflip: <span style="background:${SC.backflipping ? "red" : "blue"}">${SC.backflipping ? "yes" : "no"}</span> stand: <span style="background:${SC.canStand ? "blue" : "red"}">${SC.canStand ? "yes" : "no"}</span> state: ${SC.state} inputs: ${Object.keys(pressedKeys).filter(x=>pressedKeys[x])}`;
                 document.getElementById("sayer").innerHTML = tex;
-                document.getElementById("sayer").style.fontSize = Math.floor(Math.min(16, 7500 / tex.length)) + "px";
+                document.getElementById("sayer").style.fontSize = Math.floor(Math.min(16, 7800 / tex.length)) + "px";
                 SC.btgp = 0; // Delete this later!
                 
                 if(SC.backflipping) slowdown = true;
@@ -1702,6 +1728,12 @@
             document.addEventListener("keydown", function(e) {
                 let k = e.keyCode;
                 //alert("Key pressed: " + k);
+                if(k == 32) {
+                    SC.xpos = mousex;
+                    SC.ypos = mousey;
+                    SC.xvel = 0;
+                    SC.yvel = 0;
+                }
             });
             document.onmousemove = function(e) {
                 mousex = e.clientX;
